@@ -209,48 +209,47 @@ const ManagerScreen = () => {
 
         {/* שלב 2: סטטוס סמלים (מחלקות) */}
         <div className="glass-panel" style={{ width: '100%' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
             <h4 style={{ fontSize: '1.2rem', margin: 0 }}>שלב 2: הזנת סד״כ שבועי (סמלים)</h4>
-            {missingDepartments.length === 0 ? <CheckCircle2 color="var(--secondary-color)" /> : <AlertCircle color="var(--text-secondary)" opacity={0.7} />}
+            <span style={{ fontSize: '0.9rem', color: missingDepartments.length === 0 ? 'var(--secondary-color)' : 'var(--text-secondary)', fontWeight: 500 }}>
+              ({departmentsData.length}/{EXPECTED_DEPARTMENTS.length} הגישו)
+            </span>
           </div>
           
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
-            {/* מי שהגיש */}
-            <div>
-              <h5 style={{ color: 'var(--secondary-color)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <CheckCircle2 size={16} /> הגישו נתונים ({departmentsData.length}/{EXPECTED_DEPARTMENTS.length})
-              </h5>
-              {departmentsData.length === 0 ? <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>טרם התקבלו נתונים מאף מחלקה</p> : null}
-              <ul style={{ listStyle: 'none', padding: 0 }}>
-                {departmentsData.map((d, idx) => {
-                  const total = d.soldiers?.length || 0;
-                  const exceptions = d.soldiers?.filter(s => s.exceptionReason && s.exceptionReason.trim() !== '').length || 0;
-                  const available = total - exceptions;
-                  
-                  return (
-                    <li key={idx} className="animate-fade-in" style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '6px', marginBottom: '0.25rem' }}>
-                      <span style={{ fontWeight: 500 }}>{d.departmentName}</span>
-                      <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>סה״כ: {total} | כשירים: <strong style={{ color: 'var(--secondary-color)' }}>{available}</strong> | פטורים: <strong style={{ color: 'var(--danger-color)' }}>{exceptions}</strong></span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {EXPECTED_DEPARTMENTS.map(deptName => {
+              const depData = departmentsData.find(d => d.departmentName === deptName);
+              const hasSubmitted = !!depData;
 
-            {/* מי שחסר */}
-            <div>
-              <h5 style={{ color: 'var(--text-secondary)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <AlertCircle size={16} opacity={0.8} /> טרם הגישו
-              </h5>
-              {missingDepartments.length === 0 ? <p style={{ fontSize: '0.9rem', color: 'var(--secondary-color)' }}>מעולה! כולם הגישו את הנתונים.</p> : null}
-              <ul style={{ listStyle: 'none', padding: 0 }}>
-                {missingDepartments.map((d, idx) => (
-                  <li key={idx} className="animate-fade-in" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0', color: 'var(--text-secondary)', opacity: 0.8 }}>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'currentColor' }}></span> {d}
-                  </li>
-                ))}
-              </ul>
-            </div>
+              if (hasSubmitted) {
+                const total = depData.soldiers?.length || 0;
+                const exceptions = depData.soldiers?.filter(s => s.exceptionReason && s.exceptionReason.trim() !== '').length || 0;
+                const available = total - exceptions;
+                return (
+                  <div key={deptName} className="animate-fade-in" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', padding: '1rem', backgroundColor: 'rgba(16, 185, 129, 0.05)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <CheckCircle2 size={20} color="var(--secondary-color)" />
+                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{deptName}</span>
+                    </div>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                      סה״כ: {total} | כשירים: <strong style={{ color: 'var(--secondary-color)' }}>{available}</strong> | פטורים: <strong style={{ color: 'var(--danger-color)' }}>{exceptions}</strong>
+                    </span>
+                  </div>
+                );
+              } else {
+                return (
+                  <div key={deptName} className="animate-fade-in" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', padding: '1rem', backgroundColor: 'rgba(255, 255, 255, 0.02)', borderRadius: '8px', border: '1px dashed rgba(255, 255, 255, 0.1)', opacity: 0.6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <AlertCircle size={20} color="var(--text-secondary)" />
+                      <span style={{ fontWeight: 500, color: 'var(--text-secondary)' }}>{deptName}</span>
+                    </div>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', fontStyle: 'italic' }}>
+                      טרם הגישו
+                    </span>
+                  </div>
+                );
+              }
+            })}
           </div>
         </div>
 
