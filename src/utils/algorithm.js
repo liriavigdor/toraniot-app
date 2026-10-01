@@ -227,6 +227,18 @@ export const generateSchedule = (kitchenData, departmentsData, managerOverrides 
       if (a.availableCount !== b.availableCount) {
         return a.availableCount - b.availableCount;
       }
+      
+      // תעדוף קריטי: שבת חייבת להיות משובצת ראשונה כי היא מעניקה 2 משמרות! 
+      // אם לא נשבץ אותה ראשונה, מישהו עלול לקבל משמרת בחמישי ואז להשתבץ שוב בשבת ולקפוץ ל-3 משמרות.
+      const aIsSat = a.day.key === "ש'" ? 1 : 0;
+      const bIsSat = b.day.key === "ש'" ? 1 : 0;
+      if (aIsSat !== bIsSat) return bIsSat - aIsSat;
+
+      // לאחר מכן נתעדף סופ"ש באופן כללי כי יש פחות מקורות כוח אדם
+      if (a.day.isWeekend !== b.day.isWeekend) {
+        return a.day.isWeekend ? -1 : 1;
+      }
+
       return a.dayIndex - b.dayIndex; // chronological tiebreaker
     });
 
