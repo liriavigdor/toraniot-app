@@ -45,7 +45,7 @@ export const generateSchedule = (kitchenData, departmentsData, managerOverrides 
       } else {
         eligibleSoldiers.push({
           id,
-          name: `${s.name} (${dep.departmentName})`,
+          name: s.name,
           department: dep.departmentName,
           closesWeekend: s.closesWeekend,
           preference: s.shiftPreference || 'none',
