@@ -438,25 +438,25 @@ const ManagerScreen = () => {
                     </h5>
                     
                     {/* תצוגת PDF מקדימה (טבלה) */}
-                    <div id="schedule-table-preview" className="pdf-preview" style={{ backgroundColor: 'white', color: 'black', padding: '1.5rem', borderRadius: '8px', textAlign: 'right', marginBottom: '1.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', fontSize: '0.95rem', width: '90%', maxWidth: '450px', margin: '0 auto' }}>
+                    <div id="schedule-table-preview" className="pdf-preview" style={{ backgroundColor: 'white', color: 'black', padding: '1rem 1.5rem', borderRadius: '8px', textAlign: 'right', marginBottom: '1.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', fontSize: '0.95rem', width: '90%', maxWidth: '450px', margin: '0 auto' }}>
                       <h2 style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '0.5rem', marginBottom: '1rem', fontSize: '1.3rem' }}>שיבוץ תורני מטבח - השבוע הקרוב</h2>
                       
                       <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', margin: '0 auto' }}>
                         <thead>
                           <tr style={{ backgroundColor: '#f3f4f6', borderBottom: '2px solid #ddd' }}>
-                            <th style={{ padding: '0.75rem', border: '1px solid #ddd' }}>יום</th>
-                            <th style={{ padding: '0.75rem', border: '1px solid #ddd' }}>בוקר</th>
-                            <th style={{ padding: '0.75rem', border: '1px solid #ddd' }}>ערב</th>
+                            <th style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd' }}>יום</th>
+                            <th style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd' }}>בוקר</th>
+                            <th style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd' }}>ערב</th>
                           </tr>
                         </thead>
                         <tbody>
                           {algorithmResult.schedule.map((day, idx) => (
                             <tr key={idx}>
-                              <td style={{ padding: '0.75rem', border: '1px solid #ddd', fontWeight: 'bold' }}>{day.shortName}</td>
-                              <td style={{ padding: '0.75rem', border: '1px solid #ddd' }}>
+                              <td style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd', fontWeight: 'bold' }}>{day.shortName}</td>
+                              <td style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd' }}>
                                 {day.morning.length > 0 ? day.morning.map((name, i) => <div key={i}>{name}</div>) : '-'}
                               </td>
-                              <td style={{ padding: '0.75rem', border: '1px solid #ddd' }}>
+                              <td style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd' }}>
                                 {day.evening.length > 0 ? day.evening.map((name, i) => <div key={i}>{name}</div>) : '-'}
                               </td>
                             </tr>
