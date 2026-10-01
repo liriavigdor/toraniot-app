@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { ClipboardCheck, CheckCircle2, AlertCircle, ArrowDown, FileText, XCircle } from 'lucide-react';
+import { ClipboardCheck, CheckCircle2, AlertCircle, ArrowDown, FileText, XCircle, Share2 } from 'lucide-react';
+import html2canvas from 'html2canvas';
 import { db } from '../firebase/firebase';
 import { doc, collection, onSnapshot } from 'firebase/firestore';
 import { generateSchedule, SchedulingConflictError } from '../utils/algorithm';
@@ -437,7 +438,7 @@ const ManagerScreen = () => {
                     </h5>
                     
                     {/* תצוגת PDF מקדימה (טבלה) */}
-                    <div className="pdf-preview" style={{ backgroundColor: 'white', color: 'black', padding: '2rem', borderRadius: '8px', textAlign: 'right', marginBottom: '1.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
+                    <div id="schedule-table-preview" className="pdf-preview" style={{ backgroundColor: 'white', color: 'black', padding: '2rem', borderRadius: '8px', textAlign: 'right', marginBottom: '1.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
                       <h2 style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '1rem', marginBottom: '2rem' }}>שיבוץ תורני מטבח - השבוע הקרוב</h2>
                       
                       <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center' }}>
@@ -464,47 +465,50 @@ const ManagerScreen = () => {
                       </table>
                     </div>
 
-                    {/* שליחה לוואטסאפ */}
+                    {/* שליחה לוואטסאפ כתמונה */}
                     <div style={{ marginTop: '2rem', padding: '1.5rem', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
                       <h4 style={{ margin: 0, color: 'var(--secondary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21" /><path d="M9 10a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1" /></svg>
-                        שליחת השבצ"ק בוואטסאפ
+                        <Share2 size={24} />
+                        שתף את הטבלה
                       </h4>
-                      <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>הכנס מספר טלפון כדי לשלוח את השיבוץ כהודעה מסודרת.</p>
+                      <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>בלחיצה אחת, המערכת תצלם את הטבלה ותעביר אותך לשלוח אותה בוואטסאפ כתמונה יפה וקריאה.</p>
                       
                       <div style={{ display: 'flex', gap: '1rem', width: '100%', maxWidth: '400px', justifyContent: 'center' }}>
-                        <input 
-                          type="tel" 
-                          className="input-field" 
-                          placeholder="מספר טלפון (לדוגמה 0501234567)" 
-                          value={whatsappNumber || ''}
-                          onChange={(e) => setWhatsappNumber(e.target.value)}
-                          style={{ margin: 0, flex: 1, textAlign: 'center', direction: 'ltr' }}
-                        />
                         <button 
-                          onClick={() => {
-                            if (!whatsappNumber || whatsappNumber.length < 9) {
-                              alert('נא להזין מספר טלפון תקין');
-                              return;
+                          onClick={async () => {
+                            const element = document.getElementById('schedule-table-preview');
+                            if (!element) return;
+                            try {
+                              const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff' });
+                              canvas.toBlob(async (blob) => {
+                                const file = new File([blob], 'schedule.png', { type: 'image/png' });
+                                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                                  await navigator.share({
+                                    files: [file],
+                                    title: 'שיבוץ תורנויות',
+                                    text: 'שיבוץ תורני מטבח לשבוע הקרוב'
+                                  });
+                                } else {
+                                  // Fallback to download if sharing files is not supported
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = 'schedule.png';
+                                  a.click();
+                                  URL.revokeObjectURL(url);
+                                  alert('הטבלה הורדה כקובץ למכשיר שלך! תוכל לשלוח אותה כעת בוואטסאפ.');
+                                }
+                              });
+                            } catch(err) {
+                              console.error(err);
+                              alert('אירעה שגיאה ביצירת התמונה');
                             }
-                            let text = "*שיבוץ תורני מטבח - השבוע הקרוב* 🍳\\n\\n";
-                            algorithmResult.schedule.forEach(day => {
-                              text += `*${day.dayName} (${day.shortName})*\\n`;
-                              text += `🌅 בוקר: ${day.morning.length > 0 ? day.morning.join(', ') : '-'}\\n`;
-                              text += `🌙 ערב: ${day.evening.length > 0 ? day.evening.join(', ') : '-'}\\n\\n`;
-                            });
-                            
-                            let num = whatsappNumber.replace(/\\D/g, '');
-                            if (num.startsWith('0')) {
-                              num = '972' + num.slice(1);
-                            }
-                            const url = `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
-                            window.open(url, '_blank');
                           }} 
                           className="btn" 
-                          style={{ padding: '0.5rem 1.5rem', backgroundColor: '#25D366', color: 'white', border: 'none' }}
+                          style={{ padding: '0.75rem 1.5rem', backgroundColor: '#25D366', color: 'white', border: 'none', width: '100%', display: 'flex', justifyContent: 'center', gap: '0.5rem' }}
                         >
-                          שלח
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21" /><path d="M9 10a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1" /></svg>
+                          שלח כתמונה לוואטסאפ
                         </button>
                       </div>
                     </div>

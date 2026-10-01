@@ -79,7 +79,6 @@ export const generateSchedule = (kitchenData, departmentsData, managerOverrides 
     while (picked.length < requiredCount) {
       let candidates = eligibleSoldiers.filter(s => {
         if (s.isAgam !== isAgamReq) return false;
-        if (Math.abs(dayIndex - s.lastDayAssigned) === 1) return false; // Forbid consecutive days
         if (dayInfo.isWeekend && (!s.closesWeekend || s.isWeekendExempt)) return false;
         if (s.blockedDays.includes(dayInfo.short)) return false; // only hard blocked
         if (picked.some(p => p.id === s.id)) return false; // already picked in this shift
@@ -91,12 +90,20 @@ export const generateSchedule = (kitchenData, departmentsData, managerOverrides 
       }
       
       candidates.sort((a, b) => {
-        // 0. Double shift penalty
+        // 0. Justice (Fairness) - שוויון מעל הכל! 
+        if (a.shiftsAssigned !== b.shiftsAssigned) return a.shiftsAssigned - b.shiftsAssigned;
+
+        // 1. Double shift penalty (באותו יום)
         const aDouble = a.lastDayAssigned === dayIndex ? 1 : 0;
         const bDouble = b.lastDayAssigned === dayIndex ? 1 : 0;
         if (aDouble !== bDouble) return aDouble - bDouble;
 
-        // 0.5 Saturday rotation (Automatic behind the scenes)
+        // 2. Consecutive days penalty (ימים רצופים - עכשיו זה עונש רך ולא פסילה קשיחה כדי לשמור על שוויון)
+        const aConsecutive = Math.abs(dayIndex - a.lastDayAssigned) === 1 ? 1 : 0;
+        const bConsecutive = Math.abs(dayIndex - b.lastDayAssigned) === 1 ? 1 : 0;
+        if (aConsecutive !== bConsecutive) return aConsecutive - bConsecutive;
+
+        // 3. Saturday rotation (Automatic behind the scenes)
         if (dayInfo.key === "ש'") {
           const EXPECTED_DEPARTMENTS = ['תקשוב', 'לוגיסטיקה', 'טנ"א', 'משא"ן', 'אג"ם'];
           const currentWeek = getWeekNumber(new Date());
@@ -107,20 +114,17 @@ export const generateSchedule = (kitchenData, departmentsData, managerOverrides 
           if (aSatTarget !== bSatTarget) return bSatTarget - aSatTarget; // העדפה למחלקה שתורה הגיע
         }
 
-        // 1. Department diversity within shift (Rule 1)
-        const aDeptInShift = picked.some(p => p.department === a.department) ? 1 : 0;
-        const bDeptInShift = picked.some(p => p.department === b.department) ? 1 : 0;
-        if (aDeptInShift !== bDeptInShift) return aDeptInShift - bDeptInShift;
-
-        // 2. Soft blocked constraints get pushed to the end
+        // 4. Soft blocked constraints get pushed to the end
         const aIsSoftBlocked = a.softBlockedDays.includes(dayInfo.short) ? 1 : 0;
         const bIsSoftBlocked = b.softBlockedDays.includes(dayInfo.short) ? 1 : 0;
         if (aIsSoftBlocked !== bIsSoftBlocked) return aIsSoftBlocked - bIsSoftBlocked;
 
-        // 3. Justice (Fairness)
-        if (a.shiftsAssigned !== b.shiftsAssigned) return a.shiftsAssigned - b.shiftsAssigned;
-        
-        // 4. Preferences
+        // 5. Department diversity within shift (Rule 1)
+        const aDeptInShift = picked.some(p => p.department === a.department) ? 1 : 0;
+        const bDeptInShift = picked.some(p => p.department === b.department) ? 1 : 0;
+        if (aDeptInShift !== bDeptInShift) return aDeptInShift - bDeptInShift;
+
+        // 6. Preferences
         const prefA = (isMorning && a.preference === 'morning') || (!isMorning && a.preference === 'evening') ? -1 : (a.preference === 'none' ? 0 : 1);
         const prefB = (isMorning && b.preference === 'morning') || (!isMorning && b.preference === 'evening') ? -1 : (b.preference === 'none' ? 0 : 1);
         return prefA - prefB;
@@ -129,6 +133,10 @@ export const generateSchedule = (kitchenData, departmentsData, managerOverrides 
       const best = candidates[0];
       picked.push(best);
       best.shiftsAssigned++;
+      // שבת זה יום שלם (בוקר וערב אותו תורן) אז אנחנו סופרים לו את זה מראש כ-2 משמרות כדי שהאלגוריתם לא יחשוב שיש לו פחות משמרות וישבץ אותו שוב
+      if (dayInfo.key === "ש'") {
+        best.shiftsAssigned++;
+      }
       best.lastDayAssigned = dayIndex;
     }
 
@@ -259,11 +267,6 @@ export const generateSchedule = (kitchenData, departmentsData, managerOverrides 
         
         const pE = pM.slice(0, pE_req);
         const aE = aM.slice(0, aE_req);
-        
-        // ספירת משמרת כפולה למען ההגינות
-        [...pE, ...aE].forEach(s => {
-          s.shiftsAssigned++;
-        });
 
         // יצירת קונפליקטים במידה ויש חוסר
         if (pE.length < pE_req) {
