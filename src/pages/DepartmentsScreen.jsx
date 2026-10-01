@@ -145,7 +145,7 @@ const DepartmentsScreen = () => {
                 </button>
 
                 {/* שורה 1: פרטים בסיסיים */}
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
                   <button 
                     type="button" 
                     onClick={() => {
@@ -172,18 +172,18 @@ const DepartmentsScreen = () => {
                     placeholder="שם החייל/ת"
                     value={soldier.name}
                     onChange={(e) => handleSoldierChange(index, 'name', e.target.value)}
-                    style={{ marginBottom: 0, flex: '1 1 100px', minWidth: '100px' }}
+                    style={{ marginBottom: 0, flex: '1 1 calc(100% - 60px)', minWidth: '100px' }}
                     required
                   />
                   
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', color: 'var(--text-secondary)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', color: 'var(--text-secondary)', width: '100%', padding: '0.25rem 0' }}>
                     <input 
                       type="checkbox" 
                       checked={soldier.closesWeekend}
                       onChange={(e) => handleSoldierChange(index, 'closesWeekend', e.target.checked)}
-                      style={{ width: '18px', height: '18px', accentColor: 'var(--primary-color)' }}
+                      style={{ width: '20px', height: '20px', accentColor: 'var(--primary-color)' }}
                     />
-                    סוגר שבת?
+                    סוגר שבת? (נשאר בבסיס בחמישי-שבת)
                   </label>
                 </div>
 
@@ -219,10 +219,10 @@ const DepartmentsScreen = () => {
 
                 {/* שורה 3: אילוצים */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>אילוצים:</span>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', width: '100%' }}>אילוצי ימים (בחר ימים שבהם החייל לא יכול לעלות):</span>
                   
                   {/* בחירת ימים */}
-                  <div style={{ display: 'flex', gap: '0.25rem' }}>
+                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', width: '100%' }}>
                     {["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"].map(day => {
                       const isBlocked = (soldier.blockedDays || []).includes(day);
                       return (
@@ -231,7 +231,7 @@ const DepartmentsScreen = () => {
                           type="button"
                           onClick={() => toggleBlockedDay(index, day)}
                           style={{
-                            width: '28px', height: '28px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold',
+                            flex: '1 1 calc(14% - 0.4rem)', minWidth: '32px', height: '36px', borderRadius: '6px', fontSize: '1rem', fontWeight: 'bold',
                             border: '1px solid', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
                             backgroundColor: isBlocked ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.05)',
                             borderColor: isBlocked ? 'var(--danger-color)' : 'rgba(255,255,255,0.1)',
