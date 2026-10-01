@@ -130,3 +130,56 @@ body {
   border-color: var(--primary-color);
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
 }
+
+select option {
+  background-color: #1e1e38;
+  color: white;
+}
+
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  
+  .glass-panel {
+    background: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+  
+  /* Hide all buttons and navigation during print */
+  button, nav, .btn, header, footer, [style*="opacity: 0.5"], .lucide-log-out {
+    display: none !important;
+  }
+  
+  /* Hide all other sections in ManagerScreen except the PDF preview */
+  #root > div > div > h1, 
+  #root > div > div > p,
+  .glass-panel > h4:not(.pdf-preview h4),
+  .glass-panel > .animate-fade-in > p,
+  .glass-panel:has(table:not(.pdf-preview table)),
+  .pdf-preview ~ * {
+    display: none !important;
+  }
+
+  /* Make the PDF preview take over the page */
+  .pdf-preview {
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+    direction: rtl;
+  }
+  
+  .pdf-preview table {
+    border: 2px solid black;
+  }
+  .pdf-preview th, .pdf-preview td {
+    border: 1px solid black !important;
+  }
+}
