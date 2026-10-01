@@ -183,3 +183,74 @@ select option {
     border: 1px solid black !important;
   }
 }
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+  body {
+    font-size: 14px;
+  }
+
+  .app-container {
+    padding: 0.5rem;
+  }
+
+  .glass-panel {
+    padding: 1rem;
+    border-radius: 12px;
+  }
+
+  header.glass-panel {
+    flex-direction: column;
+    padding: 1rem;
+  }
+
+  header.glass-panel > div {
+    margin-bottom: 1rem;
+    justify-content: center;
+  }
+
+  header.glass-panel nav {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem !important;
+  }
+
+  header.glass-panel nav a {
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.85rem;
+    flex: 1 1 calc(50% - 0.5rem); /* 2 in a row */
+    text-align: center;
+  }
+
+  /* Make all tables scrollable horizontally */
+  table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Adjust inputs and buttons for touch */
+  .btn {
+    padding: 0.75rem;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .input-field {
+    padding: 0.75rem;
+  }
+
+  /* Manager Screen Specific Fixes */
+  h4 {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 1rem;
+  }
+  
+  .glass-panel > div[style*="display: flex"] {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+}

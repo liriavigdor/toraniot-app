@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { HashRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { ChefHat, Users, ClipboardCheck, LogOut } from 'lucide-react';
 import './index.css';
 import KitchenScreenComponent from './pages/KitchenScreen';
@@ -105,14 +105,14 @@ const ManagerScreen = () => (
 
 function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route path="/" element={<LoginScreen />} />
         <Route path="/kitchen" element={<KitchenScreen />} />
         <Route path="/departments" element={<DepartmentsScreen />} />
         <Route path="/manager" element={<ManagerScreen />} />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 

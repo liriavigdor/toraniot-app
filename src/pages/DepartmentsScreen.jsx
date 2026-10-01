@@ -1,18 +1,41 @@
 import React, { useState } from 'react';
 import { Users, Plus, Save, UserCheck, ShieldAlert, Sun, Moon } from 'lucide-react';
 import { db } from '../firebase/firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+
+import { useLocation } from 'react-router-dom';
 
 const EXPECTED_DEPARTMENTS = ['תקשוב', 'לוגיסטיקה', 'טנ"א', 'משא"ן', 'אג"ם'];
 
 const DepartmentsScreen = () => {
-  // קריאת שם המחלקה מה-URL (מדמה יוזר מחובר)
-  const searchParams = new URLSearchParams(window.location.search);
+  // קריאת שם המחלקה מה-URL
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
   const departmentName = searchParams.get('name') || 'לא זוהה משתמש';
   
   const [soldiers, setSoldiers] = useState([{ name: '', closesWeekend: false, exceptionType: 'none', exceptionReason: '', shiftPreference: 'none', blockedDays: [], constraintReason: '' }]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+
+  React.useEffect(() => {
+    const fetchDep = async () => {
+      if (departmentName && departmentName !== 'לא זוהה משתמש') {
+        try {
+          const docRef = doc(db, 'activeDepartments', departmentName);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (data.soldiers && data.soldiers.length > 0) {
+              setSoldiers(data.soldiers);
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    };
+    fetchDep();
+  }, [departmentName]);
 
   const handleAddSoldier = () => {
     setSoldiers([...soldiers, { name: '', closesWeekend: false, exceptionType: 'none', exceptionReason: '', shiftPreference: 'none', blockedDays: [], constraintReason: '' }]);
@@ -122,7 +145,7 @@ const DepartmentsScreen = () => {
                 </button>
 
                 {/* שורה 1: פרטים בסיסיים */}
-                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                   <button 
                     type="button" 
                     onClick={() => {
@@ -149,7 +172,7 @@ const DepartmentsScreen = () => {
                     placeholder="שם החייל/ת"
                     value={soldier.name}
                     onChange={(e) => handleSoldierChange(index, 'name', e.target.value)}
-                    style={{ marginBottom: 0, flex: 1, minWidth: '150px' }}
+                    style={{ marginBottom: 0, flex: '1 1 100px', minWidth: '100px' }}
                     required
                   />
                   
@@ -230,7 +253,7 @@ const DepartmentsScreen = () => {
                     placeholder="סיבת האילוץ (כדי שהמנהל ידע במקרה של סתירה)"
                     value={soldier.constraintReason || ''}
                     onChange={(e) => handleSoldierChange(index, 'constraintReason', e.target.value)}
-                    style={{ marginBottom: 0, padding: '0.25rem 0.5rem', fontSize: '0.9rem', flex: 1, minWidth: '200px' }}
+                    style={{ marginBottom: 0, padding: '0.75rem', fontSize: '0.9rem', flex: '1 1 100%', minWidth: '100%' }}
                   />
                 </div>
 

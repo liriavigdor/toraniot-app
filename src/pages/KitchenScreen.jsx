@@ -12,22 +12,23 @@ const KitchenScreen = () => {
   const [weekendPlasam, setWeekendPlasam] = useState('');
   const [weekendAgam, setWeekendAgam] = useState('');
   
-  const [activeDays, setActiveDays] = useState({
-    "א'": 'full', "ב'": 'full', "ג'": 'full', "ד'": 'full', "ה'": 'full', "ו'": 'full', "ש'": 'full'
-  });
+  const [includeMidweek, setIncludeMidweek] = useState(true);
+  const [includeWeekend, setIncludeWeekend] = useState(true);
+
+  // Derive the 8 days state from the checkboxes
+  const activeDays = {
+    "א'": includeMidweek ? 'half_evening' : 'off',
+    "ב'": includeMidweek ? 'full' : 'off',
+    "ג'": includeMidweek ? 'full' : 'off',
+    "ד'": includeMidweek ? 'full' : 'off',
+    "ה'": includeWeekend ? 'full' : 'off',
+    "ו'": includeWeekend ? 'full' : 'off',
+    "ש'": includeWeekend ? 'full' : 'off',
+    "א' (יציאה)": includeWeekend ? 'half_morning' : 'off'
+  };
+
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-
-  const toggleDay = (day) => {
-    setActiveDays(prev => {
-      const current = prev[day];
-      let next = 'off';
-      if (current === 'off') next = 'half';
-      else if (current === 'half') next = 'full';
-      else if (current === 'full') next = 'off';
-      return { ...prev, [day]: next };
-    });
-  };
 
   const handleEmergencyReset = async () => {
     if (!window.confirm('האם אתה בטוח שברצונך להכריז על מצב חירום? זה ימחק את דרישת המטבח הנוכחית ואת כל נתוני הסמלים שהוזנו לשבוע זה!')) {
@@ -56,7 +57,9 @@ const KitchenScreen = () => {
     try {
       // דריסת המסמך "kitchen" כדי שתמיד יהיה מעודכן לשבוע הנוכחי
       await setDoc(doc(db, 'activeWeek', 'kitchen'), {
-        activeDays: activeDays,
+        includeMidweek,
+        includeWeekend,
+        activeDays,
         midweek: { plasam: parseInt(midweekPlasam || 0), agam: parseInt(midweekAgam || 0) },
         weekend: { plasam: parseInt(weekendPlasam || 0), agam: parseInt(weekendAgam || 0) },
         updatedAt: serverTimestamp()
@@ -76,10 +79,10 @@ const KitchenScreen = () => {
       <button 
         onClick={handleEmergencyReset}
         disabled={loading}
-        style={{ position: 'absolute', top: '1rem', left: '1rem', backgroundColor: 'transparent', border: '1px solid var(--danger-color)', color: 'var(--danger-color)', padding: '0.5rem 1rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}
+        style={{ marginBottom: '1.5rem', width: '100%', justifyContent: 'center', backgroundColor: 'transparent', border: '1px solid var(--danger-color)', color: 'var(--danger-color)', padding: '0.75rem 1rem', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}
         title="מוחק את כל נתוני המטבח והסמלים לשבוע הנוכחי"
       >
-        <AlertTriangle size={16} /> איפוס מצב חירום
+        <AlertTriangle size={18} /> איפוס מצב חירום
       </button>
 
       <h3 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '1.5rem' }}>
@@ -88,17 +91,26 @@ const KitchenScreen = () => {
       
       <form onSubmit={handleSubmit}>
         
-        {/* בחירת ימי שיבוץ */}
+        {/* צ'קבוקסים לבחירת סוג שיבוץ */}
+        <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', backgroundColor: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', flex: 1, padding: '0.5rem', backgroundColor: includeMidweek ? 'rgba(99,102,241,0.1)' : 'transparent', borderRadius: '4px', border: `1px solid ${includeMidweek ? 'var(--primary-color)' : 'transparent'}` }}>
+            <input type="checkbox" checked={includeMidweek} onChange={(e) => setIncludeMidweek(e.target.checked)} style={{ width: '18px', height: '18px', accentColor: 'var(--primary-color)' }} />
+            <span style={{ fontWeight: includeMidweek ? 'bold' : 'normal' }}>אמצע שבוע (א' צהריים - ד')</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', flex: 1, padding: '0.5rem', backgroundColor: includeWeekend ? 'rgba(99,102,241,0.1)' : 'transparent', borderRadius: '4px', border: `1px solid ${includeWeekend ? 'var(--primary-color)' : 'transparent'}` }}>
+            <input type="checkbox" checked={includeWeekend} onChange={(e) => setIncludeWeekend(e.target.checked)} style={{ width: '18px', height: '18px', accentColor: 'var(--primary-color)' }} />
+            <span style={{ fontWeight: includeWeekend ? 'bold' : 'normal' }}>סופ"ש (ה' - א' בוקר)</span>
+          </label>
+        </div>
+
+        {/* בחירת ימי שיבוץ תצוגה */}
         <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '8px', marginBottom: '1.5rem', border: '1px solid var(--border-color)' }}>
           <h4 style={{ marginBottom: '1rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <CalendarDays size={18} /> בחר משמרות לשיבוץ
+            <CalendarDays size={18} /> תצוגת משמרות (מתעדכן אוטומטית)
           </h4>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem', marginTop: '-0.5rem' }}>
-            לחץ על יום כדי לשנות מצב: <strong>מלא (כחול)</strong> ➡️ <strong>לא פעיל (אפור)</strong> ➡️ <strong>חצי בוקר (כתום)</strong>
-          </p>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            {["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'"].map(day => {
-              const state = activeDays[day];
+            {["א'", "ב'", "ג'", "ד'", "ה'", "ו'", "ש'", "א' (יציאה)"].map(day => {
+              const state = activeDays[day] || 'off';
               let bg = 'rgba(255,255,255,0.05)';
               let border = 'rgba(255,255,255,0.1)';
               let color = 'var(--text-secondary)';
@@ -107,65 +119,65 @@ const KitchenScreen = () => {
                 bg = 'rgba(99, 102, 241, 0.2)';
                 border = 'var(--primary-color)';
                 color = 'white';
-              } else if (state === 'half') {
-                bg = 'rgba(245, 158, 11, 0.2)'; // Orangeish
+              } else if (state === 'half_morning' || state === 'half_evening') {
+                bg = 'rgba(245, 158, 11, 0.2)';
                 border = '#F59E0B';
                 color = '#FCD34D';
               }
 
               return (
-                <button
+                <div
                   key={day}
-                  type="button"
-                  onClick={() => toggleDay(day)}
                   style={{
-                    flex: 1, minWidth: '45px', padding: '0.75rem 0', borderRadius: '4px', fontSize: '1rem', fontWeight: 'bold',
-                    border: '1px solid', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    flex: 1, minWidth: '45px', padding: '0.75rem 0', borderRadius: '4px', fontSize: '0.9rem', fontWeight: 'bold',
+                    border: '1px solid', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                     backgroundColor: bg,
                     borderColor: border,
                     color: color,
-                    transition: 'all 0.2s'
+                    transition: 'all 0.2s',
+                    opacity: state === 'off' ? 0.5 : 1
                   }}
-                  title={state === 'full' ? "יום שלם" : (state === 'half' ? "חצי בוקר בלבד" : "לא משובץ")}
+                  title={state === 'full' ? "יום שלם" : (state.includes('half') ? "חצי יום" : "לא משובץ")}
                 >
-                  {day}
-                  {state === 'half' && <span style={{ fontSize: '0.65rem', marginTop: '0.2rem' }}>בוקר</span>}
-                </button>
+                  <span style={{ whiteSpace: 'nowrap' }}>{day}</span>
+                  {state === 'half_morning' && <span style={{ fontSize: '0.65rem', marginTop: '0.2rem' }}>בוקר</span>}
+                  {state === 'half_evening' && <span style={{ fontSize: '0.65rem', marginTop: '0.2rem' }}>ערב</span>}
+                </div>
               );
             })}
           </div>
         </div>
         
         {/* אמצע שבוע */}
-        <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '8px', marginBottom: '1.5rem', border: '1px solid var(--border-color)' }}>
+        <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '8px', marginBottom: '1.5rem', border: '1px solid var(--border-color)', opacity: includeMidweek ? 1 : 0.4 }}>
           <h4 style={{ marginBottom: '1rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <CalendarDays size={18} /> אמצע שבוע (א'-ה')
+            <CalendarDays size={18} /> אמצע שבוע (א' צהריים - ד')
           </h4>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div className="input-group" style={{ marginBottom: 0 }}>
               <label className="input-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Users size={16} /> מפלס״ם</label>
-              <input type="number" className="input-field" min="0" value={midweekPlasam} onChange={(e) => setMidweekPlasam(e.target.value)} placeholder="לדוגמה: 3" required />
+              <input type="number" className="input-field" min="0" value={midweekPlasam} onChange={(e) => setMidweekPlasam(e.target.value)} placeholder="לדוגמה: 3" required={includeMidweek} disabled={!includeMidweek} />
             </div>
             <div className="input-group" style={{ marginBottom: 0 }}>
               <label className="input-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Users size={16} /> מאג״ם</label>
-              <input type="number" className="input-field" min="0" value={midweekAgam} onChange={(e) => setMidweekAgam(e.target.value)} placeholder="לדוגמה: 2" required />
+              <input type="number" className="input-field" min="0" value={midweekAgam} onChange={(e) => setMidweekAgam(e.target.value)} placeholder="לדוגמה: 2" required={includeMidweek} disabled={!includeMidweek} />
             </div>
           </div>
         </div>
 
         {/* סופ"ש */}
-        <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '8px', marginBottom: '2rem', border: '1px solid var(--border-color)' }}>
+        <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '8px', marginBottom: '2rem', border: '1px solid var(--border-color)', opacity: includeWeekend ? 1 : 0.4 }}>
           <h4 style={{ marginBottom: '1rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <CalendarDays size={18} /> סוף שבוע (ו'-ש')
+            <CalendarDays size={18} /> סוף שבוע (ה' - א' בוקר)
           </h4>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div className="input-group" style={{ marginBottom: 0 }}>
               <label className="input-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Users size={16} /> מפלס״ם</label>
-              <input type="number" className="input-field" min="0" value={weekendPlasam} onChange={(e) => setWeekendPlasam(e.target.value)} placeholder="לדוגמה: 1" required />
+              <input type="number" className="input-field" min="0" value={weekendPlasam} onChange={(e) => setWeekendPlasam(e.target.value)} placeholder="לדוגמה: 1" required={includeWeekend} disabled={!includeWeekend} />
             </div>
             <div className="input-group" style={{ marginBottom: 0 }}>
               <label className="input-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Users size={16} /> מאג״ם</label>
-              <input type="number" className="input-field" min="0" value={weekendAgam} onChange={(e) => setWeekendAgam(e.target.value)} placeholder="לדוגמה: 1" required />
+              <input type="number" className="input-field" min="0" value={weekendAgam} onChange={(e) => setWeekendAgam(e.target.value)} placeholder="לדוגמה: 1" required={includeWeekend} disabled={!includeWeekend} />
             </div>
           </div>
         </div>
