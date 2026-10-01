@@ -438,8 +438,8 @@ const ManagerScreen = () => {
                     </h5>
                     
                     {/* תצוגת PDF מקדימה (טבלה) */}
-                    <div id="schedule-table-preview" className="pdf-preview" style={{ backgroundColor: 'white', color: 'black', padding: '2rem', borderRadius: '8px', textAlign: 'right', marginBottom: '1.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
-                      <h2 style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '1rem', marginBottom: '2rem' }}>שיבוץ תורני מטבח - השבוע הקרוב</h2>
+                    <div id="schedule-table-preview" className="pdf-preview" style={{ backgroundColor: 'white', color: 'black', padding: '1rem', borderRadius: '8px', textAlign: 'right', marginBottom: '1.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', fontSize: '0.9rem' }}>
+                      <h2 style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '0.5rem', marginBottom: '1rem', fontSize: '1.3rem' }}>שיבוץ תורני מטבח - השבוע הקרוב</h2>
                       
                       <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center' }}>
                         <thead>
