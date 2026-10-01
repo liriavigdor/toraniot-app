@@ -444,19 +444,19 @@ const ManagerScreen = () => {
                       <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center' }}>
                         <thead>
                           <tr style={{ backgroundColor: '#f3f4f6', borderBottom: '2px solid #ddd' }}>
-                            <th style={{ padding: '0.75rem', border: '1px solid #ddd' }}>יום</th>
-                            <th style={{ padding: '0.75rem', border: '1px solid #ddd' }}>משמרת בוקר</th>
-                            <th style={{ padding: '0.75rem', border: '1px solid #ddd' }}>משמרת ערב</th>
+                            <th style={{ padding: '0.5rem', border: '1px solid #ddd' }}>יום</th>
+                            <th style={{ padding: '0.5rem', border: '1px solid #ddd' }}>משמרת בוקר</th>
+                            <th style={{ padding: '0.5rem', border: '1px solid #ddd' }}>משמרת ערב</th>
                           </tr>
                         </thead>
                         <tbody>
                           {algorithmResult.schedule.map((day, idx) => (
                             <tr key={idx}>
-                              <td style={{ padding: '1rem', border: '1px solid #ddd', fontWeight: 'bold' }}>{day.shortName}</td>
-                              <td style={{ padding: '1rem', border: '1px solid #ddd' }}>
+                              <td style={{ padding: '0.5rem', border: '1px solid #ddd', fontWeight: 'bold' }}>{day.shortName}</td>
+                              <td style={{ padding: '0.5rem', border: '1px solid #ddd' }}>
                                 {day.morning.length > 0 ? day.morning.map((name, i) => <div key={i}>{name}</div>) : '-'}
                               </td>
-                              <td style={{ padding: '1rem', border: '1px solid #ddd' }}>
+                              <td style={{ padding: '0.5rem', border: '1px solid #ddd' }}>
                                 {day.evening.length > 0 ? day.evening.map((name, i) => <div key={i}>{name}</div>) : '-'}
                               </td>
                             </tr>
