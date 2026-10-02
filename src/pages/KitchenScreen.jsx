@@ -15,6 +15,27 @@ const KitchenScreen = () => {
   const [includeMidweek, setIncludeMidweek] = useState(true);
   const [includeWeekend, setIncludeWeekend] = useState(true);
 
+  React.useEffect(() => {
+    const fetchKitchenData = async () => {
+      try {
+        const { getDoc } = await import('firebase/firestore');
+        const docSnap = await getDoc(doc(db, 'activeWeek', 'kitchen'));
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setMidweekPlasam(data.midweek?.plasam?.toString() || '');
+          setMidweekAgam(data.midweek?.agam?.toString() || '');
+          setWeekendPlasam(data.weekend?.plasam?.toString() || '');
+          setWeekendAgam(data.weekend?.agam?.toString() || '');
+          if (data.includeMidweek !== undefined) setIncludeMidweek(data.includeMidweek);
+          if (data.includeWeekend !== undefined) setIncludeWeekend(data.includeWeekend);
+        }
+      } catch (err) {
+        console.error("Error fetching kitchen data:", err);
+      }
+    };
+    fetchKitchenData();
+  }, []);
+
   // Derive the 8 days state from the checkboxes
   const activeDays = {
     "א'": includeMidweek ? 'half_evening' : 'off',
