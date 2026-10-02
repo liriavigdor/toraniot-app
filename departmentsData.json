@@ -1,0 +1,314 @@
+[
+  {
+    "departmentName": "אג\"ם",
+    "soldiers": [
+      {
+        "shiftPreference": "none",
+        "blockedDays": [],
+        "constraintReason": "",
+        "closesWeekend": false,
+        "exceptionType": "none",
+        "name": "עומרי אגם",
+        "exceptionReason": "עולה ש\"ג"
+      },
+      {
+        "exceptionReason": "",
+        "blockedDays": [],
+        "name": "ליטל אגם",
+        "closesWeekend": true,
+        "exceptionType": "none",
+        "constraintReason": "",
+        "shiftPreference": "none"
+      },
+      {
+        "name": "ליאם אגם",
+        "closesWeekend": true,
+        "exceptionType": "none",
+        "blockedDays": [],
+        "shiftPreference": "none",
+        "exceptionReason": "",
+        "constraintReason": ""
+      },
+      {
+        "constraintReason": "",
+        "exceptionReason": "",
+        "blockedDays": [],
+        "exceptionType": "none",
+        "closesWeekend": false,
+        "name": "מיכאל אגם",
+        "shiftPreference": "none"
+      },
+      {
+        "closesWeekend": true,
+        "exceptionType": "none",
+        "exceptionReason": "",
+        "name": "שרירי אגם",
+        "shiftPreference": "none",
+        "blockedDays": [],
+        "constraintReason": ""
+      },
+      {
+        "blockedDays": [],
+        "constraintReason": "",
+        "shiftPreference": "none",
+        "exceptionReason": "",
+        "closesWeekend": true,
+        "exceptionType": "none",
+        "name": "נעמי אגם"
+      },
+      {
+        "constraintReason": "",
+        "blockedDays": [],
+        "name": "נדב אגם",
+        "exceptionReason": "",
+        "closesWeekend": true,
+        "exceptionType": "none",
+        "shiftPreference": "none"
+      },
+      {
+        "exceptionType": "full",
+        "closesWeekend": false,
+        "constraintReason": "",
+        "shiftPreference": "none",
+        "blockedDays": [],
+        "exceptionReason": "פטור מהכל",
+        "name": "ג'ינגי אגם"
+      },
+      {
+        "name": "עמית אגם",
+        "shiftPreference": "none",
+        "constraintReason": "",
+        "blockedDays": [],
+        "exceptionReason": "",
+        "exceptionType": "none",
+        "closesWeekend": true
+      },
+      {
+        "name": "קורן",
+        "constraintReason": "",
+        "exceptionReason": "",
+        "exceptionType": "none",
+        "closesWeekend": false,
+        "blockedDays": [],
+        "shiftPreference": "none"
+      },
+      {
+        "exceptionReason": "",
+        "exceptionType": "none",
+        "closesWeekend": false,
+        "constraintReason": "",
+        "blockedDays": [],
+        "name": "ליהי אגם",
+        "shiftPreference": "none"
+      }
+    ]
+  },
+  {
+    "departmentName": "טנ\"א",
+    "soldiers": [
+      {
+        "constraintReason": "",
+        "exceptionReason": "",
+        "name": "בן",
+        "blockedDays": [],
+        "shiftPreference": "none",
+        "closesWeekend": true,
+        "exceptionType": "none"
+      },
+      {
+        "constraintReason": "תש 2",
+        "name": "עדן",
+        "shiftPreference": "none",
+        "blockedDays": [
+          "א'",
+          "ב'"
+        ],
+        "exceptionType": "none",
+        "closesWeekend": true,
+        "exceptionReason": ""
+      },
+      {
+        "exceptionReason": "נהג",
+        "blockedDays": [],
+        "exceptionType": "full",
+        "closesWeekend": false,
+        "shiftPreference": "none",
+        "constraintReason": "",
+        "name": "דמקה"
+      },
+      {
+        "shiftPreference": "none",
+        "blockedDays": [],
+        "exceptionType": "none",
+        "closesWeekend": false,
+        "exceptionReason": "",
+        "constraintReason": "תש 2",
+        "name": "עידו ב"
+      },
+      {
+        "shiftPreference": "none",
+        "exceptionType": "none",
+        "closesWeekend": false,
+        "constraintReason": "רפואי",
+        "blockedDays": [
+          "א'",
+          "ב'",
+          "ג'",
+          "ד'",
+          "ה'"
+        ],
+        "name": "מנטל",
+        "exceptionReason": ""
+      },
+      {
+        "shiftPreference": "none",
+        "blockedDays": [],
+        "name": "ליהי",
+        "closesWeekend": false,
+        "exceptionType": "none",
+        "exceptionReason": "",
+        "constraintReason": ""
+      }
+    ]
+  },
+  {
+    "departmentName": "לוגיסטיקה",
+    "soldiers": [
+      {
+        "name": "לירי",
+        "constraintReason": "",
+        "shiftPreference": "none",
+        "blockedDays": [],
+        "exceptionReason": "נטחן",
+        "exceptionType": "full",
+        "closesWeekend": false
+      },
+      {
+        "exceptionReason": "",
+        "name": "מעיין",
+        "blockedDays": [
+          "ג'",
+          "ד'",
+          "ה'"
+        ],
+        "exceptionType": "none",
+        "closesWeekend": true,
+        "constraintReason": "כנס משתחררים",
+        "shiftPreference": "none"
+      },
+      {
+        "shiftPreference": "none",
+        "exceptionType": "none",
+        "closesWeekend": false,
+        "name": "הדס",
+        "blockedDays": [
+          "ג'",
+          "ד'",
+          "ה'"
+        ],
+        "exceptionReason": "",
+        "constraintReason": "כנס משתחררים"
+      },
+      {
+        "shiftPreference": "none",
+        "name": "אליה ",
+        "blockedDays": [],
+        "exceptionType": "weekend",
+        "closesWeekend": false,
+        "exceptionReason": "תש 2",
+        "constraintReason": ""
+      },
+      {
+        "exceptionType": "none",
+        "closesWeekend": true,
+        "blockedDays": [],
+        "exceptionReason": "",
+        "shiftPreference": "morning",
+        "constraintReason": "",
+        "name": "ירין"
+      }
+    ]
+  },
+  {
+    "departmentName": "משא\"ן",
+    "soldiers": [
+      {
+        "blockedDays": [],
+        "exceptionReason": "",
+        "constraintReason": "",
+        "closesWeekend": false,
+        "exceptionType": "none",
+        "name": "רומי",
+        "shiftPreference": "none"
+      },
+      {
+        "name": "נויה",
+        "exceptionReason": "",
+        "blockedDays": [],
+        "shiftPreference": "none",
+        "constraintReason": "",
+        "closesWeekend": false,
+        "exceptionType": "none"
+      },
+      {
+        "blockedDays": [],
+        "shiftPreference": "none",
+        "name": "אייר רונן",
+        "exceptionType": "none",
+        "closesWeekend": false,
+        "exceptionReason": "",
+        "constraintReason": ""
+      }
+    ]
+  },
+  {
+    "departmentName": "תקשוב",
+    "soldiers": [
+      {
+        "name": "שוהם פאר",
+        "constraintReason": "",
+        "exceptionType": "weekend",
+        "closesWeekend": false,
+        "shiftPreference": "morning",
+        "exceptionReason": "נהג מבצעי",
+        "blockedDays": []
+      },
+      {
+        "name": "קסם",
+        "blockedDays": [],
+        "exceptionReason": "",
+        "shiftPreference": "none",
+        "constraintReason": "",
+        "closesWeekend": false,
+        "exceptionType": "none"
+      },
+      {
+        "exceptionReason": "",
+        "blockedDays": [],
+        "exceptionType": "none",
+        "closesWeekend": false,
+        "constraintReason": "",
+        "name": "דביר ",
+        "shiftPreference": "none"
+      },
+      {
+        "constraintReason": "",
+        "closesWeekend": true,
+        "exceptionType": "full",
+        "name": "עדי",
+        "shiftPreference": "none",
+        "blockedDays": [],
+        "exceptionReason": "רפואי"
+      },
+      {
+        "constraintReason": "",
+        "exceptionReason": "נהג",
+        "name": "אוראל",
+        "closesWeekend": true,
+        "exceptionType": "full",
+        "shiftPreference": "none",
+        "blockedDays": []
+      }
+    ]
+  }
+]

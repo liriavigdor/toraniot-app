@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { ClipboardCheck, CheckCircle2, AlertCircle, ArrowDown, FileText, XCircle, Share2 } from 'lucide-react';
+import { ClipboardCheck, CheckCircle2, AlertCircle, ArrowDown, FileText, XCircle, Share2, ChevronDown, ChevronUp, BrainCircuit, MessageSquareText } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { db } from '../firebase/firebase';
-import { doc, collection, onSnapshot } from 'firebase/firestore';
+import { doc, collection, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { generateSchedule, SchedulingConflictError } from '../utils/algorithm';
 
 // מחלקות שצריכות להגיש כדי שהמערכת תוכל לשבץ - נעדכן לפי הצורך
@@ -12,11 +12,22 @@ const ManagerScreen = () => {
   const [kitchenData, setKitchenData] = useState(null);
   const [departmentsData, setDepartmentsData] = useState([]);
   const [managerOverrides, setManagerOverrides] = useState({});
-  const [kitchenOverrides, setKitchenOverrides] = useState({});
+  const [kitchenOverrides, setKitchenOverrides] = useState(() => {
+    const saved = localStorage.getItem('toraniot_kitchenOverrides');
+    return saved ? JSON.parse(saved) : {};
+  });
   const [showKitchenOverrides, setShowKitchenOverrides] = useState(false);
   const [algorithmResult, setAlgorithmResult] = useState(null);
   const [algorithmError, setAlgorithmError] = useState(null);
   const [whatsappNumber, setWhatsappNumber] = useState('0546231678');
+  const [showConsiderations, setShowConsiderations] = useState(false);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [scheduleFilter, setScheduleFilter] = useState('all');
+
+  const [justiceData, setJusticeData] = useState(null);
+  const [historyData, setHistoryData] = useState({});
+  const [editingShift, setEditingShift] = useState(null);
 
   useEffect(() => {
     // 1. האזנה בזמן אמת לדרישות המטבח השבועיות
@@ -35,9 +46,23 @@ const ManagerScreen = () => {
       setDepartmentsData(deps);
     });
 
+    // 3. האזנה לטבלת הצדק
+    const unsubJustice = onSnapshot(doc(db, 'justiceTable', 'current'), (docSnap) => {
+      if (docSnap.exists()) setJusticeData(docSnap.data());
+      else setJusticeData(null);
+    });
+    
+    // 4. האזנה להיסטוריית משמרות
+    const unsubHistory = onSnapshot(doc(db, 'history', 'stats'), (docSnap) => {
+      if (docSnap.exists()) setHistoryData(docSnap.data());
+      else setHistoryData({});
+    });
+
     return () => {
       unsubKitchen();
       unsubDepartments();
+      unsubJustice();
+      unsubHistory();
     };
   }, []);
 
@@ -54,10 +79,14 @@ const ManagerScreen = () => {
   };
 
   const handleKitchenOverride = (dayKey, shift, type, val) => {
-    setKitchenOverrides(prev => ({
-      ...prev,
-      [`${dayKey}_${shift}_${type}`]: val
-    }));
+    setKitchenOverrides(prev => {
+      const updated = {
+        ...prev,
+        [`${dayKey}_${shift}_${type}`]: val
+      };
+      localStorage.setItem('toraniot_kitchenOverrides', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const handleRunAlgorithm = () => {
@@ -65,7 +94,7 @@ const ManagerScreen = () => {
     setAlgorithmResult(null);
 
     try {
-      const result = generateSchedule(kitchenData, departmentsData, managerOverrides, kitchenOverrides);
+      const result = generateSchedule(kitchenData, departmentsData, managerOverrides, kitchenOverrides, historyData);
       setAlgorithmResult(result);
       // במערכת אמיתית פה נייצר את ה-PDF ונשמור ל-Firebase
     } catch (error) {
@@ -75,6 +104,91 @@ const ManagerScreen = () => {
         setAlgorithmError({ message: 'אירעה שגיאה לא צפויה בעת הרצת האלגוריתם.', conflicts: [error.message] });
       }
     }
+  };
+
+  const handleFeedbackSubmit = () => {
+    // In a real system, save this to Firebase so the AI/algorithm can "learn" from it
+    console.log("Feedback submitted for algorithm training:", feedbackText);
+    setFeedbackSubmitted(true);
+    setTimeout(() => {
+      setFeedbackSubmitted(false);
+      setFeedbackText('');
+    }, 4000);
+  };
+
+  const handleApproveSchedule = async () => {
+    if (!algorithmResult) return;
+    
+    const shiftStats = {};
+    const addToStats = (s, isWeekend, weight) => {
+       const key = `${s.name}_${s.department}`;
+       if (!shiftStats[key]) shiftStats[key] = { total: 0, weekend: 0, midweek: 0 };
+       shiftStats[key].total += weight;
+       if (isWeekend) shiftStats[key].weekend += weight;
+       else shiftStats[key].midweek += weight;
+    };
+
+    algorithmResult.schedule.forEach(day => {
+       const isWeekend = day.isWeekend || day.shortName === "ה'";
+       const weight = day.shortName === "ש'" ? 0.5 : 1;
+       day.morning.forEach(s => addToStats(s, isWeekend, weight));
+       day.evening.forEach(s => addToStats(s, isWeekend, weight));
+    });
+
+    await setDoc(doc(db, 'justiceTable', 'current'), {
+      schedule: algorithmResult.schedule,
+      timestamp: new Date().toISOString()
+    });
+
+    const historyRef = doc(db, 'history', 'stats');
+    // אנו דורסים את ההיסטוריה לחלוטין כך שתשקף רק את השבוע האחרון
+    await setDoc(historyRef, shiftStats);
+    
+    setAlgorithmResult(null); // Clear preview to force focus on Step 5
+  };
+
+  const handleBaltamChange = async (dayIdx, shiftTime, idx, oldPerson, newPersonStr) => {
+    if (!newPersonStr) {
+      setEditingShift(null);
+      return;
+    }
+    const [newName, newDep] = newPersonStr.split('_');
+    const isWeekend = justiceData.schedule[dayIdx].isWeekend || justiceData.schedule[dayIdx].shortName === "ה'";
+    const weight = justiceData.schedule[dayIdx].shortName === "ש'" ? 0.5 : 1;
+
+    const historyRef = doc(db, 'history', 'stats');
+    const historySnap = await getDoc(historyRef);
+    const globalStats = historySnap.exists() ? historySnap.data() : {};
+    
+    const oldKey = `${oldPerson.name}_${oldPerson.department}`;
+    const newKey = `${newName}_${newDep}`;
+    
+    if (globalStats[oldKey]) {
+        globalStats[oldKey].total = Math.max(0, globalStats[oldKey].total - weight);
+        if (isWeekend) globalStats[oldKey].weekend = Math.max(0, globalStats[oldKey].weekend - weight);
+        else globalStats[oldKey].midweek = Math.max(0, globalStats[oldKey].midweek - weight);
+    }
+    
+    if (!globalStats[newKey]) globalStats[newKey] = { total: 0, weekend: 0, midweek: 0 };
+    globalStats[newKey].total += weight;
+    if (isWeekend) globalStats[newKey].weekend += weight;
+    else globalStats[newKey].midweek += weight;
+
+    await setDoc(historyRef, globalStats);
+
+    const newSchedule = [...justiceData.schedule];
+    newSchedule[dayIdx][shiftTime][idx] = { 
+        name: newName, 
+        department: newDep, 
+        isAgam: newDep === 'אג"ם' 
+    };
+
+    await setDoc(doc(db, 'justiceTable', 'current'), {
+        ...justiceData,
+        schedule: newSchedule
+    });
+    
+    setEditingShift(null);
   };
 
   return (
@@ -224,7 +338,7 @@ const ManagerScreen = () => {
 
               if (hasSubmitted) {
                 const total = depData.soldiers?.length || 0;
-                const exceptions = depData.soldiers?.filter(s => s.exceptionReason && s.exceptionReason.trim() !== '').length || 0;
+                const exceptions = depData.soldiers?.filter(s => s.exceptionType && s.exceptionType !== 'none').length || 0;
                 const available = total - exceptions;
                 return (
                   <div key={deptName} className="animate-fade-in" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', padding: '1rem', backgroundColor: 'rgba(16, 185, 129, 0.05)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
@@ -438,8 +552,16 @@ const ManagerScreen = () => {
                     </h5>
                     
                     {/* תצוגת PDF מקדימה (טבלה) */}
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                      <button onClick={() => setScheduleFilter('all')} className="btn" style={{ padding: '0.4rem 1rem', backgroundColor: scheduleFilter === 'all' ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)' }}>הכל</button>
+                      <button onClick={() => setScheduleFilter('plasam')} className="btn" style={{ padding: '0.4rem 1rem', backgroundColor: scheduleFilter === 'plasam' ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)' }}>פלס״ם</button>
+                      <button onClick={() => setScheduleFilter('agam')} className="btn" style={{ padding: '0.4rem 1rem', backgroundColor: scheduleFilter === 'agam' ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)' }}>אג״ם</button>
+                    </div>
+                    
                     <div id="schedule-table-preview" className="pdf-preview" style={{ backgroundColor: 'white', color: 'black', padding: '1rem 1.5rem', borderRadius: '8px', textAlign: 'right', marginBottom: '1.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', fontSize: '0.95rem', width: '90%', maxWidth: '450px', margin: '0 auto' }}>
-                      <h2 style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '0.5rem', marginBottom: '1rem', fontSize: '1.3rem' }}>שיבוץ תורני מטבח - השבוע הקרוב</h2>
+                      <h2 style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '0.5rem', marginBottom: '1rem', fontSize: '1.3rem' }}>
+                        שיבוץ תורני מטבח - {scheduleFilter === 'plasam' ? 'פלס״ם' : (scheduleFilter === 'agam' ? 'אג״ם' : 'הכל')}
+                      </h2>
                       
                       <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', margin: '0 auto' }}>
                         <thead>
@@ -450,19 +572,96 @@ const ManagerScreen = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {algorithmResult.schedule.map((day, idx) => (
-                            <tr key={idx}>
-                              <td style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd', fontWeight: 'bold' }}>{day.shortName}</td>
-                              <td style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd' }}>
-                                {day.morning.length > 0 ? day.morning.map((name, i) => <div key={i}>{name}</div>) : '-'}
-                              </td>
-                              <td style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd' }}>
-                                {day.evening.length > 0 ? day.evening.map((name, i) => <div key={i}>{name}</div>) : '-'}
-                              </td>
-                            </tr>
-                          ))}
+                          {algorithmResult.schedule.map((day, idx) => {
+                            const getDepartmentColor = (depName) => {
+                              const colors = { 'תקשוב': '#bae6fd', 'לוגיסטיקה': '#fef08a', 'טנ"א': '#bbf7d0', 'משא"ן': '#fbcfe8', 'אג"ם': '#fed7aa' };
+                              return colors[depName] || '#f3f4f6';
+                            };
+                            const filterShift = (shift) => shift.filter(s => scheduleFilter === 'all' || (scheduleFilter === 'agam' ? s.isAgam : !s.isAgam));
+                            
+                            const filteredMorning = filterShift(day.morning);
+                            const filteredEvening = filterShift(day.evening);
+                            
+                            // Align lengths so they match row by row visually
+                            const maxRows = Math.max(filteredMorning.length, filteredEvening.length);
+                            const rows = Array.from({ length: maxRows === 0 ? 1 : maxRows });
+
+                            return (
+                              <tr key={idx}>
+                                <td style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd', fontWeight: 'bold', width: '20%' }}>{day.shortName}</td>
+                                <td style={{ padding: '0', border: '1px solid #ddd', verticalAlign: 'top', width: '40%' }}>
+                                  {rows.map((_, i) => {
+                                    if (maxRows === 0) return <div key={i} style={{ padding: '0.4rem' }}>-</div>;
+                                    const s = filteredMorning[i];
+                                    return s ? <div key={i} style={{ padding: '0.4rem', borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none', backgroundColor: getDepartmentColor(s.department) }}>{s.name}</div> : <div key={i} style={{ padding: '0.4rem', borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none' }}>&nbsp;</div>;
+                                  })}
+                                </td>
+                                <td style={{ padding: '0', border: '1px solid #ddd', verticalAlign: 'top', width: '40%' }}>
+                                  {rows.map((_, i) => {
+                                    if (maxRows === 0) return <div key={i} style={{ padding: '0.4rem' }}>-</div>;
+                                    const s = filteredEvening[i];
+                                    return s ? <div key={i} style={{ padding: '0.4rem', borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none', backgroundColor: getDepartmentColor(s.department) }}>{s.name}</div> : <div key={i} style={{ padding: '0.4rem', borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none' }}>&nbsp;</div>;
+                                  })}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
+                    </div>
+
+                    {/* תפריט שיקולים ולמידה */}
+                    <div style={{ marginTop: '2rem', padding: '1.5rem', backgroundColor: 'rgba(99, 102, 241, 0.05)', borderRadius: '8px', border: '1px solid rgba(99, 102, 241, 0.3)', textAlign: 'right' }}>
+                      <button 
+                        onClick={() => setShowConsiderations(!showConsiderations)}
+                        style={{ background: 'none', border: 'none', color: 'var(--primary-color)', width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '1.1rem', fontWeight: 600, padding: '0.5rem 0', cursor: 'pointer' }}
+                      >
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <BrainCircuit size={20} /> תפריט שיקולים והחלטות אלגוריתם
+                        </span>
+                        {showConsiderations ? <ChevronUp /> : <ChevronDown />}
+                      </button>
+
+                      {showConsiderations && (
+                        <div className="animate-fade-in" style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(99, 102, 241, 0.2)' }}>
+                          <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                            האלגוריתם התבסס על החוקים והשיקולים הבאים בעת יצירת השיבוץ:
+                          </p>
+                          <ul style={{ listStyleType: 'none', padding: 0, margin: '0 0 1.5rem 0' }}>
+                            {algorithmResult.considerations?.map((cons, idx) => (
+                              <li key={idx} style={{ padding: '0.5rem', backgroundColor: 'rgba(255,255,255,0.02)', marginBottom: '0.5rem', borderRadius: '4px', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                                {cons}
+                              </li>
+                            ))}
+                          </ul>
+
+                          <div style={{ backgroundColor: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '6px' }}>
+                            <h5 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--secondary-color)', margin: '0 0 0.75rem 0', fontSize: '1rem' }}>
+                              <MessageSquareText size={18} /> ביקורת ולמידת מכונה
+                            </h5>
+                            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                              משהו לא מדויק? שיבצנו מישהו יותר מדי בסופ"ש? כתוב לנו כאן, והאלגוריתם ילמד מכך וידייק את המשקלים שלו לשבועות הבאים.
+                            </p>
+                            <textarea 
+                              className="input-field" 
+                              style={{ width: '100%', minHeight: '80px', padding: '0.75rem', marginBottom: '0.75rem' }}
+                              placeholder="לדוגמה: שיבצת את מעיין יותר מדי פעמים בסופ״ש יחסית לשאר..."
+                              value={feedbackText}
+                              onChange={(e) => setFeedbackText(e.target.value)}
+                            />
+                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                              <button 
+                                className="btn btn-secondary" 
+                                style={{ fontSize: '0.9rem', padding: '0.5rem 1.5rem' }}
+                                onClick={handleFeedbackSubmit}
+                                disabled={!feedbackText.trim() || feedbackSubmitted}
+                              >
+                                {feedbackSubmitted ? 'הביקורת נשלחה ונלמדה! ✅' : 'שלח לאלגוריתם'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* שליחה לוואטסאפ כתמונה */}
@@ -513,6 +712,13 @@ const ManagerScreen = () => {
                       </div>
                     </div>
 
+                    <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'center' }}>
+                      <button onClick={handleApproveSchedule} className="btn" style={{ padding: '0.75rem 1.5rem', backgroundColor: '#F59E0B', color: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.1rem' }}>
+                        <ClipboardCheck size={20} />
+                        חותמת מנהל: אשר שבצ״ק והעבר לטבלת צדק
+                      </button>
+                    </div>
+
                     <p style={{ marginTop: '1.5rem', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>האלגוריתם שילב <strong>{algorithmResult.totalEligible}</strong> חיילים תוך התחשבות בחצאי משמרות, שוויון נטל ואילוצי מערכת.</p>
                   </div>
                 )}
@@ -536,6 +742,97 @@ const ManagerScreen = () => {
               </div>
             )}
           </div>
+        </div>
+
+        {/* חץ למטה */}
+        <ArrowDown size={32} color={justiceData ? "var(--primary-color)" : "var(--text-secondary)"} style={{ opacity: justiceData ? 1 : 0.5 }} />
+
+        {/* שלב 5: טבלת הצדק ובלת"מים */}
+        <div className="glass-panel" style={{ width: '100%', borderColor: justiceData ? 'var(--primary-color)' : 'var(--border-color)', position: 'relative' }}>
+          <h4 style={{ fontSize: '1.2rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+             <ClipboardCheck /> שלב 5: טבלת הצדק ובלת״מים
+          </h4>
+          
+          {justiceData ? (
+            <div className="animate-fade-in" style={{ textAlign: 'center' }}>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
+                כאן מנוהל השבצ״ק בפועל. לחץ על שם של חייל כדי לעדכן בלת״ם (החלפה). כל שינוי יתעדכן אוטומטית בהיסטוריית המשמרות וישפיע על שבוע הבא.
+              </p>
+
+              <div style={{ overflowX: 'auto', backgroundColor: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '8px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', fontSize: '0.9rem' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>יום</th>
+                      <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>בוקר</th>
+                      <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>ערב</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {justiceData.schedule.map((day, dayIdx) => (
+                      <tr key={dayIdx}>
+                        <td style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', fontWeight: 'bold' }}>{day.shortName}</td>
+                        <td style={{ padding: '0', borderBottom: '1px solid rgba(255,255,255,0.05)', borderLeft: '1px solid rgba(255,255,255,0.05)', verticalAlign: 'top' }}>
+                          {day.morning.length === 0 ? <div style={{ padding: '0.5rem' }}>-</div> : day.morning.map((s, idx) => (
+                            <div key={idx} style={{ padding: '0.5rem', borderBottom: idx < day.morning.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.02)', transition: 'all 0.2s' }} onClick={() => setEditingShift({ dayIdx, shiftTime: 'morning', idx, oldPerson: s })} title="לחץ להחלפה">
+                               {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'morning' && editingShift?.idx === idx ? (
+                                 <select 
+                                    autoFocus
+                                    onBlur={() => setEditingShift(null)}
+                                    onChange={(e) => handleBaltamChange(dayIdx, 'morning', idx, s, e.target.value)}
+                                    style={{ width: '100%', padding: '0.2rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
+                                 >
+                                   <option value="">בחר מחליף...</option>
+                                   {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
+                                     <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
+                                       {soldier.name} ({d.departmentName})
+                                     </option>
+                                   )))}
+                                 </select>
+                               ) : (
+                                 <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.25rem', color: 'var(--text-primary)' }}>
+                                   {s.name} <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>({s.department})</span> ✏️
+                                 </span>
+                               )}
+                            </div>
+                          ))}
+                        </td>
+                        <td style={{ padding: '0', borderBottom: '1px solid rgba(255,255,255,0.05)', verticalAlign: 'top' }}>
+                          {day.evening.length === 0 ? <div style={{ padding: '0.5rem' }}>-</div> : day.evening.map((s, idx) => (
+                            <div key={idx} style={{ padding: '0.5rem', borderBottom: idx < day.evening.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.02)', transition: 'all 0.2s' }} onClick={() => setEditingShift({ dayIdx, shiftTime: 'evening', idx, oldPerson: s })} title="לחץ להחלפה">
+                               {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'evening' && editingShift?.idx === idx ? (
+                                 <select 
+                                    autoFocus
+                                    onBlur={() => setEditingShift(null)}
+                                    onChange={(e) => handleBaltamChange(dayIdx, 'evening', idx, s, e.target.value)}
+                                    style={{ width: '100%', padding: '0.2rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
+                                 >
+                                   <option value="">בחר מחליף...</option>
+                                   {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
+                                     <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
+                                       {soldier.name} ({d.departmentName})
+                                     </option>
+                                   )))}
+                                 </select>
+                               ) : (
+                                 <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.25rem', color: 'var(--text-primary)' }}>
+                                   {s.name} <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>({s.department})</span> ✏️
+                                 </span>
+                               )}
+                            </div>
+                          ))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+              טבלת הצדק תהיה זמינה לאחר שתאשר את השיבוץ משלב 4 באמצעות "חותמת מנהל".
+            </p>
+          )}
         </div>
 
       </div>

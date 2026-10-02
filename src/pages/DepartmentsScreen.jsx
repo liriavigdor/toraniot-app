@@ -13,7 +13,7 @@ const DepartmentsScreen = () => {
   const searchParams = new URLSearchParams(location.search);
   const departmentName = searchParams.get('name') || 'לא זוהה משתמש';
   
-  const [soldiers, setSoldiers] = useState([{ name: '', closesWeekend: false, exceptionType: 'none', exceptionReason: '', shiftPreference: 'none', blockedDays: [], constraintReason: '' }]);
+  const [soldiers, setSoldiers] = useState([{ name: '', isNewSoldier: false, closesWeekend: false, exceptionType: 'none', exceptionReason: '', shiftPreference: 'none', blockedDays: [], constraintReason: '', spreadPreference: 'none', shiftTypePreference: 'none', preferredBuddy: '' }]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -38,7 +38,7 @@ const DepartmentsScreen = () => {
   }, [departmentName]);
 
   const handleAddSoldier = () => {
-    setSoldiers([...soldiers, { name: '', closesWeekend: false, exceptionType: 'none', exceptionReason: '', shiftPreference: 'none', blockedDays: [], constraintReason: '' }]);
+    setSoldiers([...soldiers, { name: '', isNewSoldier: false, closesWeekend: false, exceptionType: 'none', exceptionReason: '', shiftPreference: 'none', blockedDays: [], constraintReason: '', spreadPreference: 'none', shiftTypePreference: 'none', preferredBuddy: '' }]);
   };
 
   const handleSoldierChange = (index, field, value) => {
@@ -176,15 +176,27 @@ const DepartmentsScreen = () => {
                     required
                   />
                   
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', color: 'var(--text-secondary)', width: '100%', padding: '0.25rem 0' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={soldier.closesWeekend}
-                      onChange={(e) => handleSoldierChange(index, 'closesWeekend', e.target.checked)}
-                      style={{ width: '20px', height: '20px', accentColor: 'var(--primary-color)' }}
-                    />
-                    סוגר שבת? (נשאר בבסיס בחמישי-שבת)
-                  </label>
+                  <div style={{ display: 'flex', width: '100%', gap: '1rem', flexWrap: 'wrap' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', color: 'var(--text-secondary)' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={soldier.closesWeekend}
+                        onChange={(e) => handleSoldierChange(index, 'closesWeekend', e.target.checked)}
+                        style={{ width: '18px', height: '18px', accentColor: 'var(--primary-color)' }}
+                      />
+                      סוגר שבת? (חמישי-שבת)
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', color: '#10B981' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={soldier.isNewSoldier}
+                        onChange={(e) => handleSoldierChange(index, 'isNewSoldier', e.target.checked)}
+                        style={{ width: '18px', height: '18px', accentColor: '#10B981' }}
+                      />
+                      חייל חדש? (שבוע חסד)
+                    </label>
+                  </div>
                 </div>
 
                 {/* שורה 2: פטורים ואילוצים */}
@@ -255,6 +267,50 @@ const DepartmentsScreen = () => {
                     onChange={(e) => handleSoldierChange(index, 'constraintReason', e.target.value)}
                     style={{ marginBottom: 0, padding: '0.75rem', fontSize: '0.9rem', flex: '1 1 100%', minWidth: '100%' }}
                   />
+                </div>
+
+                {/* שורה 4: העדפות אישיות (חדש) */}
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap', backgroundColor: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1, minWidth: '150px' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>סגנון שיבוץ:</span>
+                    <select
+                      className="input-field"
+                      value={soldier.spreadPreference || 'none'}
+                      onChange={(e) => handleSoldierChange(index, 'spreadPreference', e.target.value)}
+                      style={{ marginBottom: 0, padding: '0.4rem', fontSize: '0.9rem' }}
+                    >
+                      <option value="none">ללא העדפה</option>
+                      <option value="consecutive">במכה (יום אחרי יום)</option>
+                      <option value="spread">בפיזור (לתת רווח)</option>
+                    </select>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1, minWidth: '150px' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>העדפת משמרת:</span>
+                    <select
+                      className="input-field"
+                      value={soldier.shiftTypePreference || 'none'}
+                      onChange={(e) => handleSoldierChange(index, 'shiftTypePreference', e.target.value)}
+                      style={{ marginBottom: 0, padding: '0.4rem', fontSize: '0.9rem' }}
+                    >
+                      <option value="none">ללא העדפה</option>
+                      <option value="full">ברצף (יום שלם)</option>
+                      <option value="half">חצי פה חצי שם (משמרת בודדת)</option>
+                    </select>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1, minWidth: '150px' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>חברים מועדפים (Buddy):</span>
+                    <input 
+                      type="text" 
+                      className="input-field" 
+                      placeholder="שם החבר/ה (אופציונלי)"
+                      value={soldier.preferredBuddy || ''}
+                      onChange={(e) => handleSoldierChange(index, 'preferredBuddy', e.target.value)}
+                      style={{ marginBottom: 0, padding: '0.4rem', fontSize: '0.9rem' }}
+                    />
+                  </div>
                 </div>
 
               </div>
