@@ -6,7 +6,7 @@ import { doc, collection, onSnapshot, setDoc, getDoc } from 'firebase/firestore'
 import { generateSchedule, SchedulingConflictError } from '../utils/algorithm';
 
 // מחלקות שצריכות להגיש כדי שהמערכת תוכל לשבץ - נעדכן לפי הצורך
-const EXPECTED_DEPARTMENTS = ['תקשוב', 'לוגיסטיקה', 'טנ"א', 'משא"ן', 'אג"ם'];
+const EXPECTED_DEPARTMENTS = ['תקשוב', 'לוגיסטיקה', 'טנ"א', 'משא"ן'];
 
 const ManagerScreen = () => {
   const [kitchenData, setKitchenData] = useState(null);
@@ -119,13 +119,13 @@ const ManagerScreen = () => {
   const handleApproveSchedule = async () => {
     if (!algorithmResult) return;
     
-    const shiftStats = {};
+    const updatedStats = { ...historyData };
     const addToStats = (s, isWeekend, weight) => {
        const key = `${s.name}_${s.department}`;
-       if (!shiftStats[key]) shiftStats[key] = { total: 0, weekend: 0, midweek: 0 };
-       shiftStats[key].total += weight;
-       if (isWeekend) shiftStats[key].weekend += weight;
-       else shiftStats[key].midweek += weight;
+       if (!updatedStats[key]) updatedStats[key] = { total: 0, weekend: 0, midweek: 0 };
+       updatedStats[key].total += weight;
+       if (isWeekend) updatedStats[key].weekend += weight;
+       else updatedStats[key].midweek += weight;
     };
 
     algorithmResult.schedule.forEach(day => {
@@ -141,8 +141,8 @@ const ManagerScreen = () => {
     });
 
     const historyRef = doc(db, 'history', 'stats');
-    // אנו דורסים את ההיסטוריה לחלוטין כך שתשקף רק את השבוע האחרון
-    await setDoc(historyRef, shiftStats);
+    // צוברים את ההיסטוריה משבוע לשבוע כדי לשמור על הגינות דו-שבועית/חודשית
+    await setDoc(historyRef, updatedStats);
     
     setAlgorithmResult(null); // Clear preview to force focus on Step 5
   };
@@ -219,10 +219,6 @@ const ManagerScreen = () => {
                     <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>פלס״ם</span>
                     <strong style={{ display: 'block', fontSize: '1.4rem', color: 'var(--secondary-color)' }}>{kitchenData.midweek?.plasam || 0}</strong>
                   </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>אג״ם</span>
-                    <strong style={{ display: 'block', fontSize: '1.4rem', color: 'var(--secondary-color)' }}>{kitchenData.midweek?.agam || 0}</strong>
-                  </div>
                 </div>
               </div>
               
@@ -233,10 +229,6 @@ const ManagerScreen = () => {
                   <div style={{ textAlign: 'center' }}>
                     <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>פלס״ם</span>
                     <strong style={{ display: 'block', fontSize: '1.4rem', color: 'var(--secondary-color)' }}>{kitchenData.weekend?.plasam || 0}</strong>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>אג״ם</span>
-                    <strong style={{ display: 'block', fontSize: '1.4rem', color: 'var(--secondary-color)' }}>{kitchenData.weekend?.agam || 0}</strong>
                   </div>
                 </div>
               </div>
@@ -258,9 +250,7 @@ const ManagerScreen = () => {
                         <tr style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
                           <th style={{ padding: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>יום</th>
                           <th style={{ padding: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>בוקר פלס״ם</th>
-                          <th style={{ padding: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>בוקר אג״ם</th>
                           <th style={{ padding: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>ערב פלס״ם</th>
-                          <th style={{ padding: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>ערב אג״ם</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -294,13 +284,7 @@ const ManagerScreen = () => {
                                   {hasMorning ? <input type="number" min="0" placeholder={defPlasam} style={{ width: '60px', textAlign: 'center', backgroundColor: 'transparent', border: '1px solid var(--border-color)', color: 'white', borderRadius: '4px', padding: '0.2rem' }} value={kitchenOverrides[`${day.key}_morning_plasam`] ?? ''} onChange={e => handleKitchenOverride(day.key, 'morning', 'plasam', e.target.value)} /> : '-'}
                                 </td>
                                 <td style={{ padding: '0.75rem 0.5rem' }}>
-                                  {hasMorning ? <input type="number" min="0" placeholder={defAgam} style={{ width: '60px', textAlign: 'center', backgroundColor: 'transparent', border: '1px solid var(--border-color)', color: 'white', borderRadius: '4px', padding: '0.2rem' }} value={kitchenOverrides[`${day.key}_morning_agam`] ?? ''} onChange={e => handleKitchenOverride(day.key, 'morning', 'agam', e.target.value)} /> : '-'}
-                                </td>
-                                <td style={{ padding: '0.75rem 0.5rem' }}>
                                   {hasEvening ? <input type="number" min="0" placeholder={defPlasam} style={{ width: '60px', textAlign: 'center', backgroundColor: 'transparent', border: '1px solid var(--border-color)', color: 'white', borderRadius: '4px', padding: '0.2rem' }} value={kitchenOverrides[`${day.key}_evening_plasam`] ?? ''} onChange={e => handleKitchenOverride(day.key, 'evening', 'plasam', e.target.value)} /> : '-'}
-                                </td>
-                                <td style={{ padding: '0.75rem 0.5rem' }}>
-                                  {hasEvening ? <input type="number" min="0" placeholder={defAgam} style={{ width: '60px', textAlign: 'center', backgroundColor: 'transparent', border: '1px solid var(--border-color)', color: 'white', borderRadius: '4px', padding: '0.2rem' }} value={kitchenOverrides[`${day.key}_evening_agam`] ?? ''} onChange={e => handleKitchenOverride(day.key, 'evening', 'agam', e.target.value)} /> : '-'}
                                 </td>
                               </tr>
                             );
@@ -338,8 +322,11 @@ const ManagerScreen = () => {
 
               if (hasSubmitted) {
                 const total = depData.soldiers?.length || 0;
-                const exceptions = depData.soldiers?.filter(s => s.exceptionType && s.exceptionType !== 'none').length || 0;
-                const available = total - exceptions;
+                const fullExceptions = depData.soldiers?.filter(s => s.exceptionType === 'full').length || 0;
+                const weekendExceptions = depData.soldiers?.filter(s => s.exceptionType === 'weekend').length || 0;
+                const availableMidweek = total - fullExceptions;
+                const availableWeekend = total - fullExceptions - weekendExceptions;
+                
                 return (
                   <div key={deptName} className="animate-fade-in" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', padding: '1rem', backgroundColor: 'rgba(16, 185, 129, 0.05)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -347,7 +334,7 @@ const ManagerScreen = () => {
                       <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{deptName}</span>
                     </div>
                     <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                      סה״כ: {total} | כשירים: <strong style={{ color: 'var(--secondary-color)' }}>{available}</strong> | פטורים: <strong style={{ color: 'var(--danger-color)' }}>{exceptions}</strong>
+                      סה״כ: {total} | אמצ״ש: <strong style={{ color: 'var(--secondary-color)' }}>{availableMidweek}</strong> | סופ״ש: <strong style={{ color: 'var(--secondary-color)' }}>{availableWeekend}</strong> | פטורים מלאים: <strong style={{ color: 'var(--danger-color)' }}>{fullExceptions}</strong>
                     </span>
                   </div>
                 );
@@ -399,8 +386,8 @@ const ManagerScreen = () => {
                     {(() => {
                       const soldiersWithExceptions = departmentsData.flatMap(dep => 
                         (dep.soldiers || [])
-                          .filter(s => s.exceptionType && s.exceptionType !== 'none')
                           .map((s, idx) => ({ ...s, depName: dep.departmentName, id: `${dep.departmentName}_${idx}` }))
+                          .filter(s => s.exceptionType && s.exceptionType !== 'none')
                       );
 
                       if (soldiersWithExceptions.length === 0) {
@@ -458,8 +445,8 @@ const ManagerScreen = () => {
                     {(() => {
                       const soldiersWithConstraints = departmentsData.flatMap(dep => 
                         (dep.soldiers || [])
-                          .filter(s => s.blockedDays && s.blockedDays.length > 0)
                           .map((s, idx) => ({ ...s, depName: dep.departmentName, id: `${dep.departmentName}_${idx}` }))
+                          .filter(s => s.blockedDays && s.blockedDays.length > 0)
                       );
 
                       if (soldiersWithConstraints.length === 0) {
@@ -555,12 +542,11 @@ const ManagerScreen = () => {
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
                       <button onClick={() => setScheduleFilter('all')} className="btn" style={{ padding: '0.4rem 1rem', backgroundColor: scheduleFilter === 'all' ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)' }}>הכל</button>
                       <button onClick={() => setScheduleFilter('plasam')} className="btn" style={{ padding: '0.4rem 1rem', backgroundColor: scheduleFilter === 'plasam' ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)' }}>פלס״ם</button>
-                      <button onClick={() => setScheduleFilter('agam')} className="btn" style={{ padding: '0.4rem 1rem', backgroundColor: scheduleFilter === 'agam' ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)' }}>אג״ם</button>
                     </div>
                     
                     <div id="schedule-table-preview" className="pdf-preview" style={{ backgroundColor: 'white', color: 'black', padding: '1rem 1.5rem', borderRadius: '8px', textAlign: 'right', marginBottom: '1.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', fontSize: '0.95rem', width: '90%', maxWidth: '450px', margin: '0 auto' }}>
                       <h2 style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '0.5rem', marginBottom: '1rem', fontSize: '1.3rem' }}>
-                        שיבוץ תורני מטבח - {scheduleFilter === 'plasam' ? 'פלס״ם' : (scheduleFilter === 'agam' ? 'אג״ם' : 'הכל')}
+                        שיבוץ תורני מטבח - {scheduleFilter === 'plasam' ? 'פלס״ם' : 'הכל'}
                       </h2>
                       
                       <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', margin: '0 auto' }}>
@@ -574,10 +560,10 @@ const ManagerScreen = () => {
                         <tbody>
                           {algorithmResult.schedule.map((day, idx) => {
                             const getDepartmentColor = (depName) => {
-                              const colors = { 'תקשוב': '#bae6fd', 'לוגיסטיקה': '#fef08a', 'טנ"א': '#bbf7d0', 'משא"ן': '#fbcfe8', 'אג"ם': '#fed7aa' };
+                              const colors = { 'תקשוב': '#bae6fd', 'לוגיסטיקה': '#fef08a', 'טנ"א': '#bbf7d0', 'משא"ן': '#fbcfe8' };
                               return colors[depName] || '#f3f4f6';
                             };
-                            const filterShift = (shift) => shift.filter(s => scheduleFilter === 'all' || (scheduleFilter === 'agam' ? s.isAgam : !s.isAgam));
+                            const filterShift = (shift) => shift.filter(s => scheduleFilter === 'all' || (scheduleFilter === 'plasam' && !s.isAgam));
                             
                             const filteredMorning = filterShift(day.morning);
                             const filteredEvening = filterShift(day.evening);
@@ -609,6 +595,71 @@ const ManagerScreen = () => {
                         </tbody>
                       </table>
                     </div>
+
+                    {/* דוח סטטיסטיקה והקרבות */}
+                    {algorithmResult.sacrificed && (
+                      <div style={{ marginTop: '2rem', padding: '1.5rem', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px', border: '1px solid rgba(245, 158, 11, 0.3)', textAlign: 'right' }}>
+                        <h4 style={{ color: '#F59E0B', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <AlertCircle size={20} /> "חיילים שהוקרבו" השבוע
+                        </h4>
+                        <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                          האלגוריתם נאלץ לפגוע בנוחות של חיילים אלו כדי לעמוד בחוקים קריטיים יותר (כמו אילוצים של אחרים, איסור חפיפה מחלקתית, או השלמת פערים). הם זכאים להתחשבות בשבוע הבא:
+                        </p>
+                        {algorithmResult.sacrificed.length > 0 ? (
+                          <ul style={{ listStyleType: 'none', padding: 0, margin: 0 }}>
+                            {algorithmResult.sacrificed.map((s, idx) => (
+                              <li key={idx} style={{ padding: '0.75rem', backgroundColor: 'rgba(0,0,0,0.2)', marginBottom: '0.5rem', borderRadius: '4px' }}>
+                                <strong style={{ color: 'var(--text-primary)' }}>{s.name} ({s.department})</strong>
+                                <ul style={{ marginTop: '0.25rem', paddingRight: '1.5rem', color: '#F59E0B', fontSize: '0.85rem' }}>
+                                  {s.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                                </ul>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div style={{ padding: '1rem', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--secondary-color)', borderRadius: '4px', textAlign: 'center' }}>
+                            <CheckCircle2 size={24} style={{ display: 'block', margin: '0 auto 0.5rem' }} />
+                            אף חייל לא הוקרב השבוע! השיבוץ עבר בצורה חלקה ונוחה לכולם.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* סיכום כמות משמרות שבועית */}
+                    {algorithmResult.stats && (
+                      <div style={{ marginTop: '2rem', padding: '1.5rem', backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: '8px', border: '1px solid rgba(59, 130, 246, 0.3)', textAlign: 'right' }}>
+                        <h4 style={{ color: '#3B82F6', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <FileText size={20} /> סיכום משמרות שבועי
+                        </h4>
+                        <div style={{ maxHeight: '200px', overflowY: 'auto', paddingRight: '0.5rem' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', fontSize: '0.9rem' }}>
+                            <thead>
+                              <tr style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
+                                <th style={{ padding: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>שם</th>
+                                <th style={{ padding: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>מחלקה</th>
+                                <th style={{ padding: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>אמצ״ש</th>
+                                <th style={{ padding: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>סופ״ש</th>
+                                <th style={{ padding: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>סה״כ</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {algorithmResult.stats
+                                .filter(s => s.assignedDays && s.assignedDays.length > 0)
+                                .sort((a, b) => b.totalShifts - a.totalShifts)
+                                .map((s, idx) => (
+                                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                                    <td style={{ padding: '0.5rem', fontWeight: 500 }}>{s.name}</td>
+                                    <td style={{ padding: '0.5rem', color: 'var(--text-secondary)' }}>{s.department}</td>
+                                    <td style={{ padding: '0.5rem' }}>{s.midweekShifts}</td>
+                                    <td style={{ padding: '0.5rem' }}>{s.weekendShifts}</td>
+                                    <td style={{ padding: '0.5rem', fontWeight: 'bold', color: 'var(--primary-color)' }}>{s.totalShifts}</td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
 
                     {/* תפריט שיקולים ולמידה */}
                     <div style={{ marginTop: '2rem', padding: '1.5rem', backgroundColor: 'rgba(99, 102, 241, 0.05)', borderRadius: '8px', border: '1px solid rgba(99, 102, 241, 0.3)', textAlign: 'right' }}>

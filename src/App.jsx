@@ -43,7 +43,7 @@ const LoginScreen = () => {
         <>
           <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', fontSize: '1.1rem' }}>בחר את המחלקה שלך:</p>
           <div style={{ display: 'grid', gap: '1rem' }}>
-            {['תקשוב', 'לוגיסטיקה', 'טנ"א', 'משא"ן', 'אג"ם'].map(dep => (
+            {['תקשוב', 'לוגיסטיקה', 'טנ"א', 'משא"ן'].map(dep => (
               <Link key={dep} to={`/departments?name=${encodeURIComponent(dep)}`} style={{ textDecoration: 'none' }}>
                 <button className="btn btn-secondary" style={{ width: '100%', padding: '1rem', fontSize: '1.1rem', backgroundColor: 'rgba(255,255,255,0.05)' }}>
                   סמל {dep}

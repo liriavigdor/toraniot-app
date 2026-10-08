@@ -6,11 +6,9 @@ import { doc, setDoc, serverTimestamp, deleteDoc, getDocs, collection } from 'fi
 const KitchenScreen = () => {
   // אמצע שבוע
   const [midweekPlasam, setMidweekPlasam] = useState('');
-  const [midweekAgam, setMidweekAgam] = useState('');
   
   // סופ"ש
   const [weekendPlasam, setWeekendPlasam] = useState('');
-  const [weekendAgam, setWeekendAgam] = useState('');
   
   const [includeMidweek, setIncludeMidweek] = useState(true);
   const [includeWeekend, setIncludeWeekend] = useState(true);
@@ -23,9 +21,7 @@ const KitchenScreen = () => {
         if (docSnap.exists()) {
           const data = docSnap.data();
           setMidweekPlasam(data.midweek?.plasam?.toString() || '');
-          setMidweekAgam(data.midweek?.agam?.toString() || '');
           setWeekendPlasam(data.weekend?.plasam?.toString() || '');
-          setWeekendAgam(data.weekend?.agam?.toString() || '');
           if (data.includeMidweek !== undefined) setIncludeMidweek(data.includeMidweek);
           if (data.includeWeekend !== undefined) setIncludeWeekend(data.includeWeekend);
         }
@@ -81,8 +77,8 @@ const KitchenScreen = () => {
         includeMidweek,
         includeWeekend,
         activeDays,
-        midweek: { plasam: parseInt(midweekPlasam || 0), agam: parseInt(midweekAgam || 0) },
-        weekend: { plasam: parseInt(weekendPlasam || 0), agam: parseInt(weekendAgam || 0) },
+        midweek: { plasam: parseInt(midweekPlasam || 0) },
+        weekend: { plasam: parseInt(weekendPlasam || 0) },
         updatedAt: serverTimestamp()
       });
       setMessage('הדרישה לשבוע הקרוב עודכנה בהצלחה!');
@@ -179,10 +175,6 @@ const KitchenScreen = () => {
               <label className="input-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Users size={16} /> מפלס״ם</label>
               <input type="number" className="input-field" min="0" value={midweekPlasam} onChange={(e) => setMidweekPlasam(e.target.value)} placeholder="לדוגמה: 3" required={includeMidweek} disabled={!includeMidweek} />
             </div>
-            <div className="input-group" style={{ marginBottom: 0 }}>
-              <label className="input-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Users size={16} /> מאג״ם</label>
-              <input type="number" className="input-field" min="0" value={midweekAgam} onChange={(e) => setMidweekAgam(e.target.value)} placeholder="לדוגמה: 2" required={includeMidweek} disabled={!includeMidweek} />
-            </div>
           </div>
         </div>
 
@@ -195,10 +187,6 @@ const KitchenScreen = () => {
             <div className="input-group" style={{ marginBottom: 0 }}>
               <label className="input-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Users size={16} /> מפלס״ם</label>
               <input type="number" className="input-field" min="0" value={weekendPlasam} onChange={(e) => setWeekendPlasam(e.target.value)} placeholder="לדוגמה: 1" required={includeWeekend} disabled={!includeWeekend} />
-            </div>
-            <div className="input-group" style={{ marginBottom: 0 }}>
-              <label className="input-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Users size={16} /> מאג״ם</label>
-              <input type="number" className="input-field" min="0" value={weekendAgam} onChange={(e) => setWeekendAgam(e.target.value)} placeholder="לדוגמה: 1" required={includeWeekend} disabled={!includeWeekend} />
             </div>
           </div>
         </div>

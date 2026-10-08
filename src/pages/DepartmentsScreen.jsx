@@ -5,7 +5,7 @@ import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 
 import { useLocation } from 'react-router-dom';
 
-const EXPECTED_DEPARTMENTS = ['תקשוב', 'לוגיסטיקה', 'טנ"א', 'משא"ן', 'אג"ם'];
+const EXPECTED_DEPARTMENTS = ['תקשוב', 'לוגיסטיקה', 'טנ"א', 'משא"ן'];
 
 const DepartmentsScreen = () => {
   // קריאת שם המחלקה מה-URL
@@ -342,3 +342,4 @@ const DepartmentsScreen = () => {
 };
 
 export default DepartmentsScreen;
+// Reload triggered
