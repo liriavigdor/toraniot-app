@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { ClipboardCheck, CheckCircle2, AlertCircle, ArrowDown, FileText, XCircle, Share2, ChevronDown, ChevronUp, BrainCircuit, MessageSquareText, FileCheck, Unlock, PenLine } from 'lucide-react';
+import { ClipboardCheck, CheckCircle2, AlertCircle, ArrowDown, FileText, XCircle, Share2, ChevronDown, ChevronUp, BrainCircuit, MessageSquareText, FileCheck, Unlock, PenLine, CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { db } from '../firebase/firebase';
 import { doc, collection, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { generateSchedule, SchedulingConflictError } from '../utils/algorithm';
+import { getDefaultSunday, formatDayDate, getWeekRangeStr, addDaysToDateStr } from '../utils/dateUtils';
 
 // מחלקות שצריכות להגיש כדי שהמערכת תוכל לשבץ - נעדכן לפי הצורך
 const EXPECTED_DEPARTMENTS = ['תקשוב', 'לוגיסטיקה', 'טנ"א', 'משא"ן'];
@@ -34,6 +35,21 @@ const ManagerScreen = () => {
   });
   const [signSuccessMessage, setSignSuccessMessage] = useState(false);
   const [isSigning, setIsSigning] = useState(false);
+
+  const [weekStartDate, setWeekStartDate] = useState(() => {
+    return localStorage.getItem('toraniot_weekStartDate') || getDefaultSunday();
+  });
+
+  const handleDateChange = (val) => {
+    setWeekStartDate(val);
+    localStorage.setItem('toraniot_weekStartDate', val);
+  };
+
+  const handleShiftWeek = (daysOffset) => {
+    if (!weekStartDate) return;
+    const newStr = addDaysToDateStr(weekStartDate, daysOffset);
+    handleDateChange(newStr);
+  };
 
   useEffect(() => {
     // 1. האזנה בזמן אמת לדרישות המטבח השבועיות
@@ -127,7 +143,11 @@ const ManagerScreen = () => {
     if (!algorithmResult) return;
 
     await setDoc(doc(db, 'justiceTable', 'current'), {
-      schedule: algorithmResult.schedule,
+      schedule: algorithmResult.schedule.map(d => ({
+        ...d,
+        dateStr: formatDayDate(d.shortName, weekStartDate)
+      })),
+      startDate: weekStartDate,
       timestamp: new Date().toISOString(),
       isSigned: false,
       signedAt: null,
@@ -635,8 +655,58 @@ const ManagerScreen = () => {
           )}
 
           <div style={{ position: 'relative', zIndex: 1 }}>
-            <h4 style={{ fontSize: '1.2rem', marginBottom: '1.5rem' }}>שלב 4: הפעלת אלגוריתם והפקת פלט</h4>
+            <h4 style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>שלב 4: הפעלת אלגוריתם והפקת פלט</h4>
             
+            {/* בורר תאריך תחילת שבוע */}
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.75rem',
+              marginBottom: '1.5rem',
+              padding: '0.6rem 1.25rem',
+              backgroundColor: 'rgba(255, 255, 255, 0.04)',
+              borderRadius: '10px',
+              border: '1px solid var(--border-color)',
+              flexWrap: 'wrap'
+            }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                <CalendarDays size={18} color="var(--primary-color)" /> תאריך תחילת שבוע (יום א'):
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <button
+                  type="button"
+                  onClick={() => handleShiftWeek(-7)}
+                  className="btn btn-secondary"
+                  style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
+                  title="שבוע קודם"
+                >
+                  <ChevronRight size={16} />
+                </button>
+                <input 
+                  type="date" 
+                  value={weekStartDate} 
+                  onChange={(e) => handleDateChange(e.target.value)}
+                  className="input-field" 
+                  style={{ width: 'auto', padding: '0.35rem 0.6rem', margin: 0, textAlign: 'center' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleShiftWeek(7)}
+                  className="btn btn-secondary"
+                  style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
+                  title="שבוע הבא"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+              </div>
+              {weekStartDate && (
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginRight: '0.25rem' }}>
+                  (שבוע {getWeekRangeStr(weekStartDate)})
+                </span>
+              )}
+            </div>
+
             {isReadyForAlgorithm ? (
               <div className="animate-fade-in">
                 {algorithmError && (
@@ -666,16 +736,21 @@ const ManagerScreen = () => {
                     </div>
                     
                     <div id="schedule-table-preview" className="pdf-preview" style={{ backgroundColor: 'white', color: 'black', padding: '1rem 1.5rem', borderRadius: '8px', textAlign: 'right', marginBottom: '1.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', fontSize: '0.95rem', width: '90%', maxWidth: '450px', margin: '0 auto' }}>
-                      <h2 style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '0.5rem', marginBottom: '1rem', fontSize: '1.3rem' }}>
+                      <h2 style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '0.5rem', marginBottom: '1rem', fontSize: '1.25rem' }}>
                         שיבוץ תורני מטבח - {scheduleFilter === 'plasam' ? 'פלס״ם' : 'הכל'}
+                        {weekStartDate && (
+                          <span style={{ display: 'block', fontSize: '0.9rem', fontWeight: 'normal', color: '#555', marginTop: '4px' }}>
+                            שבוע {getWeekRangeStr(weekStartDate)}
+                          </span>
+                        )}
                       </h2>
                       
                       <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', margin: '0 auto' }}>
                         <thead>
                           <tr style={{ backgroundColor: '#f3f4f6', borderBottom: '2px solid #ddd' }}>
-                            <th style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd' }}>יום</th>
-                            <th style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd' }}>בוקר</th>
-                            <th style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd' }}>ערב</th>
+                            <th style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd', width: '22%' }}>יום ותאריך</th>
+                            <th style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd', width: '39%' }}>בוקר</th>
+                            <th style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd', width: '39%' }}>ערב</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -692,18 +767,26 @@ const ManagerScreen = () => {
                             // Align lengths so they match row by row visually
                             const maxRows = Math.max(filteredMorning.length, filteredEvening.length);
                             const rows = Array.from({ length: maxRows === 0 ? 1 : maxRows });
+                            const dayDateStr = formatDayDate(day.shortName, weekStartDate);
 
                             return (
                               <tr key={idx}>
-                                <td style={{ padding: '0.4rem 0.75rem', border: '1px solid #ddd', fontWeight: 'bold', width: '20%' }}>{day.shortName}</td>
-                                <td style={{ padding: '0', border: '1px solid #ddd', verticalAlign: 'top', width: '40%' }}>
+                                <td style={{ padding: '0.4rem 0.5rem', border: '1px solid #ddd', fontWeight: 'bold', width: '22%', verticalAlign: 'middle' }}>
+                                  <div style={{ fontSize: '0.95rem' }}>{day.shortName}</div>
+                                  {dayDateStr && (
+                                    <div style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 'normal', marginTop: '2px' }}>
+                                      {dayDateStr}
+                                    </div>
+                                  )}
+                                </td>
+                                <td style={{ padding: '0', border: '1px solid #ddd', verticalAlign: 'top', width: '39%' }}>
                                   {rows.map((_, i) => {
                                     if (maxRows === 0) return <div key={i} style={{ padding: '0.4rem' }}>-</div>;
                                     const s = filteredMorning[i];
                                     return s ? <div key={i} style={{ padding: '0.4rem', borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none', backgroundColor: getDepartmentColor(s.department) }}>{s.name}</div> : <div key={i} style={{ padding: '0.4rem', borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none' }}>&nbsp;</div>;
                                   })}
                                 </td>
-                                <td style={{ padding: '0', border: '1px solid #ddd', verticalAlign: 'top', width: '40%' }}>
+                                <td style={{ padding: '0', border: '1px solid #ddd', verticalAlign: 'top', width: '39%' }}>
                                   {rows.map((_, i) => {
                                     if (maxRows === 0) return <div key={i} style={{ padding: '0.4rem' }}>-</div>;
                                     const s = filteredEvening[i];
@@ -852,19 +935,19 @@ const ManagerScreen = () => {
                             try {
                               const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff' });
                               canvas.toBlob(async (blob) => {
-                                const file = new File([blob], 'schedule.png', { type: 'image/png' });
+                                const file = new File([blob], `schedule_${weekStartDate || 'week'}.png`, { type: 'image/png' });
                                 if (navigator.canShare && navigator.canShare({ files: [file] })) {
                                   await navigator.share({
                                     files: [file],
                                     title: 'שיבוץ תורנויות',
-                                    text: 'שיבוץ תורני מטבח לשבוע הקרוב'
+                                    text: `שיבוץ תורני מטבח לשבוע ${getWeekRangeStr(weekStartDate)}`
                                   });
                                 } else {
                                   // Fallback to download if sharing files is not supported
                                   const url = URL.createObjectURL(blob);
                                   const a = document.createElement('a');
                                   a.href = url;
-                                  a.download = 'schedule.png';
+                                  a.download = `schedule_${weekStartDate || 'week'}.png`;
                                   a.click();
                                   URL.revokeObjectURL(url);
                                   alert('הטבלה הורדה כקובץ למכשיר שלך! תוכל לשלוח אותה כעת בוואטסאפ.');
@@ -936,6 +1019,11 @@ const ManagerScreen = () => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
             <h4 style={{ fontSize: '1.2rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                <ClipboardCheck color="var(--primary-color)" /> שלב 5: ניהול שבצ״ק שבועי ובלת״מים
+               {(justiceData?.startDate || weekStartDate) && (
+                 <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: 'normal' }}>
+                   (שבוע {getWeekRangeStr(justiceData?.startDate || weekStartDate)})
+                 </span>
+               )}
             </h4>
             {justiceData?.isSigned ? (
               <span style={{ fontSize: '0.85rem', padding: '0.3rem 0.8rem', borderRadius: '20px', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: 'var(--secondary-color)', border: '1px solid rgba(16, 185, 129, 0.3)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontWeight: 600 }}>
@@ -960,67 +1048,77 @@ const ManagerScreen = () => {
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', fontSize: '0.9rem' }}>
                   <thead>
                     <tr style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
-                      <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>יום</th>
-                      <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>בוקר</th>
-                      <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>ערב</th>
+                      <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', width: '20%' }}>יום ותאריך</th>
+                      <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', width: '40%' }}>בוקר</th>
+                      <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', width: '40%' }}>ערב</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {justiceData.schedule.map((day, dayIdx) => (
-                      <tr key={dayIdx}>
-                        <td style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', fontWeight: 'bold' }}>{day.shortName}</td>
-                        <td style={{ padding: '0', borderBottom: '1px solid rgba(255,255,255,0.05)', borderLeft: '1px solid rgba(255,255,255,0.05)', verticalAlign: 'top' }}>
-                          {day.morning.length === 0 ? <div style={{ padding: '0.5rem' }}>-</div> : day.morning.map((s, idx) => (
-                            <div key={idx} style={{ padding: '0.5rem', borderBottom: idx < day.morning.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.02)', transition: 'all 0.2s' }} onClick={() => setEditingShift({ dayIdx, shiftTime: 'morning', idx, oldPerson: s })} title="לחץ להחלפה">
-                               {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'morning' && editingShift?.idx === idx ? (
-                                 <select 
-                                    autoFocus
-                                    onBlur={() => setEditingShift(null)}
-                                    onChange={(e) => handleBaltamChange(dayIdx, 'morning', idx, s, e.target.value)}
-                                    style={{ width: '100%', padding: '0.2rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
-                                 >
-                                   <option value="">בחר מחליף...</option>
-                                   {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
-                                     <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
-                                       {soldier.name} ({d.departmentName})
-                                     </option>
-                                   )))}
-                                 </select>
-                               ) : (
-                                 <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.25rem', color: 'var(--text-primary)' }}>
-                                   {s.name} <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>({s.department})</span> ✏️
-                                 </span>
-                               )}
-                            </div>
-                          ))}
-                        </td>
-                        <td style={{ padding: '0', borderBottom: '1px solid rgba(255,255,255,0.05)', verticalAlign: 'top' }}>
-                          {day.evening.length === 0 ? <div style={{ padding: '0.5rem' }}>-</div> : day.evening.map((s, idx) => (
-                            <div key={idx} style={{ padding: '0.5rem', borderBottom: idx < day.evening.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.02)', transition: 'all 0.2s' }} onClick={() => setEditingShift({ dayIdx, shiftTime: 'evening', idx, oldPerson: s })} title="לחץ להחלפה">
-                               {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'evening' && editingShift?.idx === idx ? (
-                                 <select 
-                                    autoFocus
-                                    onBlur={() => setEditingShift(null)}
-                                    onChange={(e) => handleBaltamChange(dayIdx, 'evening', idx, s, e.target.value)}
-                                    style={{ width: '100%', padding: '0.2rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
-                                 >
-                                   <option value="">בחר מחליף...</option>
-                                   {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
-                                     <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
-                                       {soldier.name} ({d.departmentName})
-                                     </option>
-                                   )))}
-                                 </select>
-                               ) : (
-                                 <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.25rem', color: 'var(--text-primary)' }}>
-                                   {s.name} <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>({s.department})</span> ✏️
-                                 </span>
-                               )}
-                            </div>
-                          ))}
-                        </td>
-                      </tr>
-                    ))}
+                    {justiceData.schedule.map((day, dayIdx) => {
+                      const dayDateStr = day.dateStr || formatDayDate(day.shortName, justiceData.startDate || weekStartDate);
+                      return (
+                        <tr key={dayIdx}>
+                          <td style={{ padding: '0.75rem 0.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', fontWeight: 'bold', verticalAlign: 'middle', width: '20%' }}>
+                            <div>{day.shortName}</div>
+                            {dayDateStr && (
+                              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 'normal', marginTop: '2px' }}>
+                                {dayDateStr}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '0', borderBottom: '1px solid rgba(255,255,255,0.05)', borderLeft: '1px solid rgba(255,255,255,0.05)', verticalAlign: 'top' }}>
+                            {day.morning.length === 0 ? <div style={{ padding: '0.5rem' }}>-</div> : day.morning.map((s, idx) => (
+                              <div key={idx} style={{ padding: '0.5rem', borderBottom: idx < day.morning.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.02)', transition: 'all 0.2s' }} onClick={() => setEditingShift({ dayIdx, shiftTime: 'morning', idx, oldPerson: s })} title="לחץ להחלפה">
+                                 {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'morning' && editingShift?.idx === idx ? (
+                                   <select 
+                                      autoFocus
+                                      onBlur={() => setEditingShift(null)}
+                                      onChange={(e) => handleBaltamChange(dayIdx, 'morning', idx, s, e.target.value)}
+                                      style={{ width: '100%', padding: '0.2rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
+                                   >
+                                     <option value="">בחר מחליף...</option>
+                                     {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
+                                       <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
+                                         {soldier.name} ({d.departmentName})
+                                       </option>
+                                     )))}
+                                   </select>
+                                 ) : (
+                                   <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.25rem', color: 'var(--text-primary)' }}>
+                                     {s.name} <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>({s.department})</span> ✏️
+                                   </span>
+                                 )}
+                              </div>
+                            ))}
+                          </td>
+                          <td style={{ padding: '0', borderBottom: '1px solid rgba(255,255,255,0.05)', verticalAlign: 'top' }}>
+                            {day.evening.length === 0 ? <div style={{ padding: '0.5rem' }}>-</div> : day.evening.map((s, idx) => (
+                              <div key={idx} style={{ padding: '0.5rem', borderBottom: idx < day.evening.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.02)', transition: 'all 0.2s' }} onClick={() => setEditingShift({ dayIdx, shiftTime: 'evening', idx, oldPerson: s })} title="לחץ להחלפה">
+                                 {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'evening' && editingShift?.idx === idx ? (
+                                   <select 
+                                      autoFocus
+                                      onBlur={() => setEditingShift(null)}
+                                      onChange={(e) => handleBaltamChange(dayIdx, 'evening', idx, s, e.target.value)}
+                                      style={{ width: '100%', padding: '0.2rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
+                                   >
+                                     <option value="">בחר מחליף...</option>
+                                     {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
+                                       <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
+                                         {soldier.name} ({d.departmentName})
+                                       </option>
+                                     )))}
+                                   </select>
+                                 ) : (
+                                   <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.25rem', color: 'var(--text-primary)' }}>
+                                     {s.name} <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>({s.department})</span> ✏️
+                                   </span>
+                                 )}
+                              </div>
+                            ))}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

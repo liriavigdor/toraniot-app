@@ -5,4 +5,7 @@ import { defineConfig } from 'vite'
 export default defineConfig(({ command }) => ({
   base: command === 'build' ? '/toraniot-app/' : '/',
   plugins: [react()],
+  server: {
+    port: 5178,
+  },
 }))

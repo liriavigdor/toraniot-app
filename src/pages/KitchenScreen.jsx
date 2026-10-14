@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { ChefHat, Save, Users, CalendarDays, AlertTriangle } from 'lucide-react';
+import { ChefHat, Save, Users, CalendarDays } from 'lucide-react';
 import { db } from '../firebase/firebase';
-import { doc, setDoc, serverTimestamp, deleteDoc, getDocs, collection } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 const KitchenScreen = () => {
   // אמצע שבוע
@@ -47,24 +47,6 @@ const KitchenScreen = () => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  const handleEmergencyReset = async () => {
-    if (!window.confirm('האם אתה בטוח שברצונך להכריז על מצב חירום? זה ימחק את דרישת המטבח הנוכחית ואת כל נתוני הסמלים שהוזנו לשבוע זה!')) {
-      return;
-    }
-    setLoading(true);
-    try {
-      await deleteDoc(doc(db, 'activeWeek', 'kitchen'));
-      const snapshot = await getDocs(collection(db, 'activeDepartments'));
-      const deletePromises = snapshot.docs.map(d => deleteDoc(doc(db, 'activeDepartments', d.id)));
-      await Promise.all(deletePromises);
-      setMessage('המערכת אופסה בהצלחה. ניתן להזין דרישה חדשה.');
-    } catch (err) {
-      console.error(err);
-      setMessage('שגיאה באיפוס המערכת.');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -93,14 +75,6 @@ const KitchenScreen = () => {
   return (
     <div className="glass-panel animate-fade-in" style={{ maxWidth: '600px', margin: '0 auto', position: 'relative' }}>
       
-      <button 
-        onClick={handleEmergencyReset}
-        disabled={loading}
-        style={{ marginBottom: '1.5rem', width: '100%', justifyContent: 'center', backgroundColor: 'transparent', border: '1px solid var(--danger-color)', color: 'var(--danger-color)', padding: '0.75rem 1rem', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}
-        title="מוחק את כל נתוני המטבח והסמלים לשבוע הנוכחי"
-      >
-        <AlertTriangle size={18} /> איפוס מצב חירום
-      </button>
 
       <h3 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '1.5rem' }}>
         <ChefHat color="var(--primary-color)" /> דרישת תורנים שבועית (מטבח)

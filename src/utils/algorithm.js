@@ -289,14 +289,14 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
   };
 
   const SCHEDULE_DAYS = [
-    { key: "א'", name: 'ראשון', short: "א'", isWeekend: false },
-    { key: "ב'", name: 'שני', short: "ב'", isWeekend: false },
-    { key: "ג'", name: 'שלישי', short: "ג'", isWeekend: false },
-    { key: "ד'", name: 'רביעי', short: "ד'", isWeekend: false },
-    { key: "ה'", name: 'חמישי', short: "ה'", isWeekend: false },
-    { key: "ו'", name: 'שישי', short: "ו'", isWeekend: true },
-    { key: "ש'", name: 'שבת', short: "ש'", isWeekend: true },
-    { key: "א' (יציאה)", name: 'ראשון', short: "א'", isWeekend: true } 
+    { key: "א'", name: 'ראשון', short: "א'", isWeekend: false, dayOffset: 0 },
+    { key: "ב'", name: 'שני', short: "ב'", isWeekend: false, dayOffset: 1 },
+    { key: "ג'", name: 'שלישי', short: "ג'", isWeekend: false, dayOffset: 2 },
+    { key: "ד'", name: 'רביעי', short: "ד'", isWeekend: false, dayOffset: 3 },
+    { key: "ה'", name: 'חמישי', short: "ה'", isWeekend: false, dayOffset: 4 },
+    { key: "ו'", name: 'שישי', short: "ו'", isWeekend: true, dayOffset: 5 },
+    { key: "ש'", name: 'שבת', short: "ש'", isWeekend: true, dayOffset: 6 },
+    { key: "א' (יציאה)", name: 'ראשון', short: "א'", isWeekend: true, dayOffset: 7 } 
   ];
 
   const selectedDaysMap = kitchenData.activeDays || {};
@@ -428,6 +428,7 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
     schedule.push({
       dayName: day.name,
       shortName: day.key,
+      dayOffset: day.dayOffset,
       isWeekend: isW,
       morning: m,
       evening: e
