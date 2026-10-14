@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { ClipboardCheck, CheckCircle2, AlertCircle, ArrowDown, FileText, XCircle, Share2, ChevronDown, ChevronUp, BrainCircuit, MessageSquareText, FileCheck, Unlock, PenLine, CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ClipboardCheck, CheckCircle2, AlertCircle, ArrowDown, FileText, XCircle, Share2, ChevronDown, ChevronUp, BrainCircuit, MessageSquareText, FileCheck, Unlock, PenLine, CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2, Scale, Radio, Search, Filter, RotateCcw, AlertTriangle } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { db } from '../firebase/firebase';
 import { doc, collection, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
-import { generateSchedule, SchedulingConflictError } from '../utils/algorithm';
+import { generateSchedule, SchedulingConflictError, kesherDaysToKitchenShifts } from '../utils/algorithm';
 import { getDefaultSunday, formatDayDate, getWeekRangeStr, addDaysToDateStr } from '../utils/dateUtils';
 
 // מחלקות שצריכות להגיש כדי שהמערכת תוכל לשבץ - נעדכן לפי הצורך
@@ -28,7 +28,29 @@ const ManagerScreen = () => {
 
   const [justiceData, setJusticeData] = useState(null);
   const [historyData, setHistoryData] = useState({});
+  const [kesherEntries, setKesherEntries] = useState([]);
+  const [activeTab, setActiveTab] = useState('schedule'); // 'schedule' | 'justice'
+
+  const [kesherSoldierKey, setKesherSoldierKey] = useState('');
+  const [kesherDaysCount, setKesherDaysCount] = useState('1');
+  const [kesherDate, setKesherDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [kesherNote, setKesherNote] = useState('');
+  const [kesherSubmitting, setKesherSubmitting] = useState(false);
+  const [kesherSuccessMsg, setKesherSuccessMsg] = useState('');
+
+  const [justiceSearch, setJusticeSearch] = useState('');
+  const [justiceDeptFilter, setJusticeDeptFilter] = useState('all');
+  const [justiceSortBy, setJusticeSortBy] = useState('effectiveTotal'); // 'effectiveTotal' | 'kesherDays' | 'kitchenTotal' | 'name'
+  const [justiceSortAsc, setJusticeSortAsc] = useState(false);
+
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetKesherAlso, setResetKesherAlso] = useState(false);
+  const [resetScheduleAlso, setResetScheduleAlso] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetSuccessMsg, setResetSuccessMsg] = useState(false);
+
   const [editingShift, setEditingShift] = useState(null);
+  const [addingShift, setAddingShift] = useState(null);
   const [transferredSuccess, setTransferredSuccess] = useState(false);
   const [signerName, setSignerName] = useState(() => {
     return localStorage.getItem('toraniot_signerName') || 'מנהל תורנויות';
@@ -80,11 +102,21 @@ const ManagerScreen = () => {
       else setHistoryData({});
     });
 
+    // 5. האזנה לנתוני אתר קשר
+    const unsubKesher = onSnapshot(doc(db, 'history', 'kesherSite'), (docSnap) => {
+      if (docSnap.exists() && docSnap.data().entries) {
+        setKesherEntries(docSnap.data().entries);
+      } else {
+        setKesherEntries([]);
+      }
+    });
+
     return () => {
       unsubKitchen();
       unsubDepartments();
       unsubJustice();
       unsubHistory();
+      unsubKesher();
     };
   }, []);
 
@@ -116,7 +148,7 @@ const ManagerScreen = () => {
     setAlgorithmResult(null);
 
     try {
-      const result = generateSchedule(kitchenData, departmentsData, managerOverrides, kitchenOverrides, historyData);
+      const result = generateSchedule(kitchenData, departmentsData, managerOverrides, kitchenOverrides, combinedHistory);
       setAlgorithmResult(result);
       // במערכת אמיתית פה נייצר את ה-PDF ונשמור ל-Firebase
     } catch (error) {
@@ -142,10 +174,36 @@ const ManagerScreen = () => {
   const handleTransferToStep5 = async () => {
     if (!algorithmResult) return;
 
+    if (justiceData && justiceData.schedule && justiceData.schedule.length > 0) {
+      if (!justiceData.isSigned) {
+        const proceed = window.confirm(
+          "⚠️ שים לב: בלוח השבצ״ק הנוכחי (שלב 5) יש משמרות שטרם נחתמו!\n\nאם תעביר שבצ״ק חדש כעת, המשמרות הללו יימחקו מהלוח ולא ייצברו לטבלת הצדק.\n\nמומלץ ללחוץ 'ביטול', לחתום קודם על השבצ״ק הנוכחי ('✍️ חתום ואשר שבצ״ק סופי'), ורק אז להעביר את השבצ״ק החדש.\n\nהאם לדרוס בכל זאת?"
+        );
+        if (!proceed) return;
+      } else {
+        const proceed = window.confirm(
+          "השבצ״ק הנוכחי חתום וכל משמרותיו שמורות בבטחה בטבלת הצדק החודשית.\n\nהעברת השבצ״ק החדש תציג בלוח את השבוע החדש. להמשיך?"
+        );
+        if (!proceed) return;
+      }
+    }
+
     await setDoc(doc(db, 'justiceTable', 'current'), {
       schedule: algorithmResult.schedule.map(d => ({
         ...d,
-        dateStr: formatDayDate(d.shortName, weekStartDate)
+        dateStr: formatDayDate(d.shortName, weekStartDate),
+        morning: (d.morning || []).map(s => ({
+          ...s,
+          originalName: s.name,
+          originalDepartment: s.department,
+          isEdited: false
+        })),
+        evening: (d.evening || []).map(s => ({
+          ...s,
+          originalName: s.name,
+          originalDepartment: s.department,
+          isEdited: false
+        }))
       })),
       startDate: weekStartDate,
       timestamp: new Date().toISOString(),
@@ -316,11 +374,18 @@ const ManagerScreen = () => {
       await setDoc(historyRef, globalStats);
     }
 
+    const oldOrigName = oldPerson.originalName !== undefined ? oldPerson.originalName : oldPerson.name;
+    const oldOrigDep = oldPerson.originalDepartment !== undefined ? oldPerson.originalDepartment : oldPerson.department;
+    const isNowDifferent = (newName !== oldOrigName) || (newDep !== oldOrigDep);
+
     const newSchedule = [...justiceData.schedule];
     newSchedule[dayIdx][shiftTime][idx] = { 
         name: newName, 
         department: newDep, 
-        isAgam: newDep === 'אג"ם' 
+        isAgam: newDep === 'אג"ם',
+        originalName: oldOrigName,
+        originalDepartment: oldOrigDep,
+        isEdited: isNowDifferent
     };
 
     await setDoc(doc(db, 'justiceTable', 'current'), {
@@ -332,15 +397,454 @@ const ManagerScreen = () => {
     setEditingShift(null);
   };
 
-  return (
-    <div className="animate-fade-in" style={{ maxWidth: '800px', margin: '0 auto', paddingBottom: '3rem' }}>
+  // הוספת תורן נוסף למשמרת ביום מסוים (בלת״ם)
+  const handleAddSoldierToShift = async (dayIdx, shiftTime, newPersonStr) => {
+    if (!newPersonStr) {
+      setAddingShift(null);
+      return;
+    }
+    const [newName, newDep] = newPersonStr.split('_');
+    const isWeekend = justiceData.schedule[dayIdx].isWeekend || justiceData.schedule[dayIdx].shortName === "ה'";
+    const weight = justiceData.schedule[dayIdx].shortName === "ש'" ? 0.5 : 1;
+
+    let updatedWeekContributions = justiceData.weekContributions ? { ...justiceData.weekContributions } : null;
+
+    if (justiceData.isSigned) {
+      const historyRef = doc(db, 'history', 'stats');
+      const historySnap = await getDoc(historyRef);
+      const globalStats = historySnap.exists() ? historySnap.data() : {};
       
-      <div className="glass-panel" style={{ marginBottom: '3rem', textAlign: 'center' }}>
+      const newKey = `${newName}_${newDep}`;
+      if (!globalStats[newKey]) globalStats[newKey] = { total: 0, weekend: 0, midweek: 0 };
+      globalStats[newKey].total += weight;
+      if (isWeekend) globalStats[newKey].weekend += weight;
+      else globalStats[newKey].midweek += weight;
+
+      if (updatedWeekContributions) {
+        if (!updatedWeekContributions[newKey]) updatedWeekContributions[newKey] = { total: 0, weekend: 0, midweek: 0 };
+        updatedWeekContributions[newKey].total += weight;
+        if (isWeekend) updatedWeekContributions[newKey].weekend += weight;
+        else updatedWeekContributions[newKey].midweek += weight;
+      }
+
+      await setDoc(historyRef, globalStats);
+    }
+
+    const newSchedule = [...justiceData.schedule];
+    if (!newSchedule[dayIdx][shiftTime]) {
+      newSchedule[dayIdx][shiftTime] = [];
+    }
+    newSchedule[dayIdx][shiftTime].push({
+      name: newName,
+      department: newDep,
+      isAgam: newDep === 'אג"ם',
+      originalName: null,
+      originalDepartment: null,
+      isEdited: true,
+      isAdded: true
+    });
+
+    await setDoc(doc(db, 'justiceTable', 'current'), {
+      ...justiceData,
+      schedule: newSchedule,
+      weekContributions: updatedWeekContributions
+    });
+
+    setAddingShift(null);
+  };
+
+  // הסרת תורן ממשמרת
+  const handleRemoveSoldierFromShift = async (dayIdx, shiftTime, idx, oldPerson) => {
+    if (!window.confirm(`האם להסיר את ${oldPerson.name} (${oldPerson.department}) ממשמרת זו?`)) {
+      setEditingShift(null);
+      return;
+    }
+
+    const isWeekend = justiceData.schedule[dayIdx].isWeekend || justiceData.schedule[dayIdx].shortName === "ה'";
+    const weight = justiceData.schedule[dayIdx].shortName === "ש'" ? 0.5 : 1;
+
+    let updatedWeekContributions = justiceData.weekContributions ? { ...justiceData.weekContributions } : null;
+
+    if (justiceData.isSigned) {
+      const historyRef = doc(db, 'history', 'stats');
+      const historySnap = await getDoc(historyRef);
+      const globalStats = historySnap.exists() ? historySnap.data() : {};
+      
+      const oldKey = `${oldPerson.name}_${oldPerson.department}`;
+      if (globalStats[oldKey]) {
+        globalStats[oldKey].total = Math.max(0, globalStats[oldKey].total - weight);
+        if (isWeekend) globalStats[oldKey].weekend = Math.max(0, globalStats[oldKey].weekend - weight);
+        else globalStats[oldKey].midweek = Math.max(0, globalStats[oldKey].midweek - weight);
+      }
+
+      if (updatedWeekContributions && updatedWeekContributions[oldKey]) {
+        updatedWeekContributions[oldKey].total = Math.max(0, updatedWeekContributions[oldKey].total - weight);
+        if (isWeekend) updatedWeekContributions[oldKey].weekend = Math.max(0, updatedWeekContributions[oldKey].weekend - weight);
+        else updatedWeekContributions[oldKey].midweek = Math.max(0, updatedWeekContributions[oldKey].midweek - weight);
+      }
+
+      await setDoc(historyRef, globalStats);
+    }
+
+    const newSchedule = [...justiceData.schedule];
+    newSchedule[dayIdx][shiftTime].splice(idx, 1);
+
+    await setDoc(doc(db, 'justiceTable', 'current'), {
+      ...justiceData,
+      schedule: newSchedule,
+      weekContributions: updatedWeekContributions
+    });
+
+    setEditingShift(null);
+  };
+
+  // נתוני אתר קשר וצדק משולבים - כל 1.5 ימים באתר קשר = 1 משמרת מטבח, יום עודף = 0.5 מטבח
+  const combinedHistory = React.useMemo(() => {
+    const combined = { ...historyData };
+    const kesherDaysMap = {};
+    (kesherEntries || []).forEach(e => {
+      const key = `${e.soldierName}_${e.department}`;
+      kesherDaysMap[key] = (kesherDaysMap[key] || 0) + Number(e.daysCount || 0);
+    });
+
+    // מעדכן חיילים שקיימים בהיסטוריה
+    Object.keys(combined).forEach(key => {
+      const kDays = kesherDaysMap[key] || 0;
+      const kEquiv = kesherDaysToKitchenShifts(kDays);
+      combined[key] = {
+        ...combined[key],
+        kesherDays: kDays,
+        kesherEquiv: kEquiv,
+        effectiveTotal: (combined[key].total || 0) + kEquiv,
+        effectiveMidweek: (combined[key].midweek || 0) + kEquiv,
+        effectiveWeekend: combined[key].weekend || 0
+      };
+    });
+
+    // מוסיף חיילים שיש להם רק ימי קשר וטרם ביצעו מטבח
+    Object.entries(kesherDaysMap).forEach(([key, kDays]) => {
+      if (!combined[key]) {
+        const kEquiv = kesherDaysToKitchenShifts(kDays);
+        combined[key] = {
+          total: 0,
+          midweek: 0,
+          weekend: 0,
+          kesherDays: kDays,
+          kesherEquiv: kEquiv,
+          effectiveTotal: kEquiv,
+          effectiveMidweek: kEquiv,
+          effectiveWeekend: 0
+        };
+      }
+    });
+
+    return combined;
+  }, [historyData, kesherEntries]);
+
+  // רשימת כל החיילים מכל המחלקות משוקללת עם נתוני הצדק (חיילים בעלי פטור מלא מוחרגים)
+  const allSoldiersList = React.useMemo(() => {
+    const list = [];
+    const seenKeys = new Set();
+    const fullExemptKeys = new Set();
+
+    (departmentsData || []).forEach(dep => {
+      (dep.soldiers || []).forEach((s, idx) => {
+        const id = `${dep.departmentName}_${idx}`;
+        const isExemptRejected = managerOverrides[`${id}_exception`] === 'rejected';
+        const activeExceptionType = isExemptRejected ? 'none' : (s.exceptionType || 'none');
+        if (activeExceptionType === 'full') {
+          fullExemptKeys.add(`${s.name}_${dep.departmentName}`);
+        }
+      });
+    });
+
+    (departmentsData || []).forEach(dep => {
+      (dep.soldiers || []).forEach(s => {
+        const key = `${s.name}_${dep.departmentName}`;
+        seenKeys.add(key);
+
+        // אם לחייל יש פטור מלא - מסירים אותו מטבלת הצדק
+        if (fullExemptKeys.has(key)) return;
+
+        const hist = combinedHistory[key] || { total: 0, midweek: 0, weekend: 0, kesherDays: 0, effectiveTotal: 0 };
+        const kDays = hist.kesherDays || 0;
+        const kEquiv = kesherDaysToKitchenShifts(kDays);
+        list.push({
+          name: s.name,
+          department: dep.departmentName,
+          key,
+          midweek: hist.midweek || 0,
+          weekend: hist.weekend || 0,
+          kitchenTotal: hist.total || 0,
+          kesherDays: kDays,
+          kesherEquiv: kEquiv,
+          effectiveTotal: hist.effectiveTotal !== undefined ? hist.effectiveTotal : ((hist.total || 0) + kEquiv),
+          isNew: s.isNewSoldier
+        });
+      });
+    });
+
+    Object.entries(combinedHistory).forEach(([key, hist]) => {
+      if (!seenKeys.has(key)) {
+        if (fullExemptKeys.has(key)) return;
+        const [name, dep] = key.split('_');
+        const kDays = hist.kesherDays || 0;
+        const kEquiv = kesherDaysToKitchenShifts(kDays);
+        list.push({
+          name,
+          department: dep || 'כללי',
+          key,
+          midweek: hist.midweek || 0,
+          weekend: hist.weekend || 0,
+          kitchenTotal: hist.total || 0,
+          kesherDays: kDays,
+          kesherEquiv: kEquiv,
+          effectiveTotal: hist.effectiveTotal !== undefined ? hist.effectiveTotal : ((hist.total || 0) + kEquiv),
+          isNew: false
+        });
+      }
+    });
+
+    return list;
+  }, [departmentsData, combinedHistory, managerOverrides]);
+
+  const fullExemptCount = React.useMemo(() => {
+    let count = 0;
+    (departmentsData || []).forEach(dep => {
+      (dep.soldiers || []).forEach((s, idx) => {
+        const id = `${dep.departmentName}_${idx}`;
+        const isExemptRejected = managerOverrides[`${id}_exception`] === 'rejected';
+        const activeExceptionType = isExemptRejected ? 'none' : (s.exceptionType || 'none');
+        if (activeExceptionType === 'full') count++;
+      });
+    });
+    return count;
+  }, [departmentsData, managerOverrides]);
+
+  const totalKitchenShifts = React.useMemo(() => allSoldiersList.reduce((acc, s) => acc + s.kitchenTotal, 0), [allSoldiersList]);
+  const totalKesherDays = React.useMemo(() => allSoldiersList.reduce((acc, s) => acc + s.kesherDays, 0), [allSoldiersList]);
+  const totalEffectiveShifts = React.useMemo(() => allSoldiersList.reduce((acc, s) => acc + s.effectiveTotal, 0), [allSoldiersList]);
+  const avgShiftsPerSoldier = React.useMemo(() => allSoldiersList.length > 0 ? (totalEffectiveShifts / allSoldiersList.length).toFixed(1) : '0', [allSoldiersList, totalEffectiveShifts]);
+
+  // רשימה מסוננת וממוינת לטבלת הצדק
+  const filteredAndSortedJusticeList = React.useMemo(() => {
+    return allSoldiersList
+      .filter(s => {
+        if (justiceDeptFilter !== 'all' && s.department !== justiceDeptFilter) return false;
+        if (justiceSearch.trim()) {
+          const q = justiceSearch.trim().toLowerCase();
+          return s.name.toLowerCase().includes(q) || s.department.toLowerCase().includes(q);
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        let valA = a[justiceSortBy];
+        let valB = b[justiceSortBy];
+        if (typeof valA === 'string') {
+          return justiceSortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        }
+        return justiceSortAsc ? (valA || 0) - (valB || 0) : (valB || 0) - (valA || 0);
+      });
+  }, [allSoldiersList, justiceDeptFilter, justiceSearch, justiceSortBy, justiceSortAsc]);
+
+  // הוספת רשומת אתר קשר
+  const handleAddKesher = async (e) => {
+    e?.preventDefault();
+    if (!kesherSoldierKey) {
+      alert("אנא בחר חייל מהרשימה");
+      return;
+    }
+    const days = parseInt(kesherDaysCount, 10);
+    if (isNaN(days) || days <= 0) {
+      alert("כמות הימים חייבת להיות לפחות 1");
+      return;
+    }
+
+    const [sName, sDep] = kesherSoldierKey.split('_');
+    setKesherSubmitting(true);
+
+    try {
+      const newEntry = {
+        id: `kesher_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        soldierName: sName,
+        department: sDep,
+        daysCount: days,
+        date: kesherDate || new Date().toISOString().split('T')[0],
+        note: kesherNote.trim() || '',
+        createdAt: new Date().toISOString()
+      };
+
+      const updatedEntries = [newEntry, ...(kesherEntries || [])];
+      await setDoc(doc(db, 'history', 'kesherSite'), { entries: updatedEntries });
+
+      // סנכרון ישיר ל-history/stats
+      const historyRef = doc(db, 'history', 'stats');
+      const historySnap = await getDoc(historyRef);
+      const stats = historySnap.exists() ? historySnap.data() : {};
+      if (!stats[kesherSoldierKey]) {
+        stats[kesherSoldierKey] = { total: 0, midweek: 0, weekend: 0 };
+      }
+      stats[kesherSoldierKey].kesherDays = (stats[kesherSoldierKey].kesherDays || 0) + days;
+      await setDoc(historyRef, stats);
+
+      const addedEquiv = kesherDaysToKitchenShifts(days);
+      setKesherSuccessMsg(`נוספו ${days} ימים באתר קשר עבור ${sName}! (שווה ערך ל-${addedEquiv} משמרות מטבח)`);
+      setTimeout(() => setKesherSuccessMsg(''), 4000);
+      setKesherSoldierKey('');
+      setKesherDaysCount('1');
+      setKesherNote('');
+    } catch (err) {
+      console.error("Error adding kesher entry:", err);
+      alert("שגיאה בהוספת רישום אתר קשר: " + err.message);
+    } finally {
+      setKesherSubmitting(false);
+    }
+  };
+
+  // מחיקת רשומת אתר קשר
+  const handleDeleteKesher = async (entryId) => {
+    const entry = (kesherEntries || []).find(e => e.id === entryId);
+    if (!entry) return;
+    if (!window.confirm(`האם למחוק את רישום אתר הקשר של ${entry.soldierName} (${entry.daysCount} ימים)?`)) {
+      return;
+    }
+
+    try {
+      const updatedEntries = (kesherEntries || []).filter(e => e.id !== entryId);
+      await setDoc(doc(db, 'history', 'kesherSite'), { entries: updatedEntries });
+
+      const key = `${entry.soldierName}_${entry.department}`;
+      const historyRef = doc(db, 'history', 'stats');
+      const historySnap = await getDoc(historyRef);
+      if (historySnap.exists()) {
+        const stats = historySnap.data();
+        if (stats[key]) {
+          stats[key].kesherDays = Math.max(0, (stats[key].kesherDays || 0) - entry.daysCount);
+          await setDoc(historyRef, stats);
+        }
+      }
+    } catch (err) {
+      console.error("Error deleting kesher entry:", err);
+      alert("שגיאה במחיקת רישום: " + err.message);
+    }
+  };
+
+  // איפוס טבלת הצדק (כולל וידוא מודאלי ומחיקת השבצ״ק השגוי)
+  const handleResetJusticeTable = async () => {
+    setIsResetting(true);
+    try {
+      if (resetKesherAlso) {
+        // איפוס מלא כולל אתר קשר
+        await setDoc(doc(db, 'history', 'stats'), {});
+        await setDoc(doc(db, 'history', 'kesherSite'), { entries: [] });
+        setKesherEntries([]);
+        setHistoryData({});
+      } else {
+        // איפוס משמרות מטבח בלבד ושמירה על ימי אתר קשר אם קיימים
+        const historyRef = doc(db, 'history', 'stats');
+        const historySnap = await getDoc(historyRef);
+        const currentStats = historySnap.exists() ? historySnap.data() : {};
+        const cleanedStats = {};
+        Object.entries(currentStats).forEach(([key, val]) => {
+          if (val && val.kesherDays) {
+            cleanedStats[key] = { total: 0, midweek: 0, weekend: 0, kesherDays: val.kesherDays };
+          }
+        });
+        await setDoc(historyRef, cleanedStats);
+        setHistoryData(cleanedStats);
+      }
+
+      // ביטול חתימת/צבירת השבצ״ק הנוכחי שהוכנס בטעות
+      if (justiceData) {
+        if (resetScheduleAlso) {
+          await setDoc(doc(db, 'justiceTable', 'current'), {
+            schedule: null,
+            isSigned: false,
+            historyApplied: false,
+            weekContributions: null,
+            signedAt: null,
+            signedBy: null
+          });
+          setJusticeData(null);
+        } else {
+          await setDoc(doc(db, 'justiceTable', 'current'), {
+            ...justiceData,
+            isSigned: false,
+            historyApplied: false,
+            weekContributions: null,
+            signedAt: null,
+            signedBy: null
+          });
+        }
+      }
+
+      setShowResetModal(false);
+      setResetSuccessMsg(true);
+      setTimeout(() => setResetSuccessMsg(false), 5000);
+    } catch (err) {
+      console.error("Error resetting justice table:", err);
+      alert("שגיאה באיפוס טבלת הצדק: " + err.message);
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  return (
+    <div className="animate-fade-in" style={{ maxWidth: '850px', margin: '0 auto', paddingBottom: '3rem' }}>
+      
+      <div className="glass-panel" style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
         <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: '0.75rem', fontSize: '1.8rem', margin: 0 }}>
-          <ClipboardCheck color="var(--primary-color)" size={32} /> בקרה ושיבוץ (שבוע נוכחי)
+          <ClipboardCheck color="var(--primary-color)" size={32} /> מרכז בקרה וניהול תורנויות
         </h3>
       </div>
 
+      {/* בורר טאבים עליון: שיבוץ שבועי מול טבלת צדק ואתר קשר */}
+      <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={() => setActiveTab('schedule')}
+          className="btn"
+          style={{
+            padding: '0.75rem 1.6rem',
+            fontSize: '1.05rem',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            backgroundColor: activeTab === 'schedule' ? 'var(--primary-color)' : 'rgba(255, 255, 255, 0.04)',
+            borderColor: activeTab === 'schedule' ? 'var(--primary-color)' : 'var(--border-color)',
+            boxShadow: activeTab === 'schedule' ? '0 4px 15px rgba(99, 102, 241, 0.35)' : 'none'
+          }}
+        >
+          <ClipboardCheck size={20} />
+          שיבוץ שבועי ובלת״מים
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('justice')}
+          className="btn"
+          style={{
+            padding: '0.75rem 1.6rem',
+            fontSize: '1.05rem',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            backgroundColor: activeTab === 'justice' ? 'var(--secondary-color)' : 'rgba(255, 255, 255, 0.04)',
+            borderColor: activeTab === 'justice' ? 'var(--secondary-color)' : 'var(--border-color)',
+            boxShadow: activeTab === 'justice' ? '0 4px 15px rgba(16, 185, 129, 0.35)' : 'none'
+          }}
+        >
+          <Scale size={20} />
+          טבלת צדק חודשית & אתר קשר
+          {kesherEntries.length > 0 && (
+            <span style={{ fontSize: '0.75rem', backgroundColor: 'rgba(255,255,255,0.25)', padding: '0.1rem 0.5rem', borderRadius: '10px', fontWeight: 'bold' }}>
+              {kesherEntries.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeTab === 'schedule' && (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem' }}>
         
         {/* שלב 1: סטטוס מטבח */}
@@ -1038,11 +1542,18 @@ const ManagerScreen = () => {
           
           {justiceData ? (
             <div className="animate-fade-in" style={{ textAlign: 'center' }}>
-              <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', textAlign: 'right', fontSize: '0.95rem' }}>
-                כאן מנוהל השבצ״ק השבועי בפועל. לחץ על שם של חייל כדי לעדכן בלת״ם (החלפה).
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '0.75rem', textAlign: 'right', fontSize: '0.95rem' }}>
+                כאן מנוהל השבצ״ק השבועי בפועל. לחץ על שם של חייל כדי לעדכן בלת״ם (החלפה או הסרה), או לחץ על <strong>+ הוסף תורן</strong> להגדלת כמות התורנים ביום מסוים.
                 <br />
                 <strong>בסוף השבוע:</strong> וודא מי באמת עלה למשמרות, וחתום על השבצ״ק בחלק התחתון לסגירת השבוע ועדכון היסטוריית הצדק.
               </p>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', color: '#34d399', backgroundColor: 'rgba(16, 185, 129, 0.12)', padding: '0.3rem 0.8rem', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.35)', fontWeight: 500 }}>
+                  <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#10B981', display: 'inline-block' }}></span>
+                  משבצת ירוקה = תורן שעודכן או נוסף בעריכה (בלת״ם)
+                </span>
+              </div>
 
               <div style={{ overflowX: 'auto', backgroundColor: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '8px' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', fontSize: '0.9rem' }}>
@@ -1066,55 +1577,269 @@ const ManagerScreen = () => {
                               </div>
                             )}
                           </td>
+
+                          {/* עמודת בוקר */}
                           <td style={{ padding: '0', borderBottom: '1px solid rgba(255,255,255,0.05)', borderLeft: '1px solid rgba(255,255,255,0.05)', verticalAlign: 'top' }}>
-                            {day.morning.length === 0 ? <div style={{ padding: '0.5rem' }}>-</div> : day.morning.map((s, idx) => (
-                              <div key={idx} style={{ padding: '0.5rem', borderBottom: idx < day.morning.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.02)', transition: 'all 0.2s' }} onClick={() => setEditingShift({ dayIdx, shiftTime: 'morning', idx, oldPerson: s })} title="לחץ להחלפה">
-                                 {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'morning' && editingShift?.idx === idx ? (
-                                   <select 
-                                      autoFocus
-                                      onBlur={() => setEditingShift(null)}
-                                      onChange={(e) => handleBaltamChange(dayIdx, 'morning', idx, s, e.target.value)}
-                                      style={{ width: '100%', padding: '0.2rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
-                                   >
-                                     <option value="">בחר מחליף...</option>
-                                     {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
-                                       <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
-                                         {soldier.name} ({d.departmentName})
-                                       </option>
-                                     )))}
-                                   </select>
-                                 ) : (
-                                   <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.25rem', color: 'var(--text-primary)' }}>
-                                     {s.name} <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>({s.department})</span> ✏️
-                                   </span>
-                                 )}
+                            {(!day.morning || day.morning.length === 0) && !(addingShift?.dayIdx === dayIdx && addingShift?.shiftTime === 'morning') && (
+                              <div style={{ padding: '0.6rem 0.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }}>
+                                <span style={{ opacity: 0.35, fontSize: '0.9rem' }}>-</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setAddingShift({ dayIdx, shiftTime: 'morning' })}
+                                  className="btn btn-secondary"
+                                  style={{
+                                    padding: '0.2rem 0.55rem',
+                                    fontSize: '0.75rem',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    borderColor: 'rgba(99, 102, 241, 0.4)',
+                                    color: 'var(--primary-color)'
+                                  }}
+                                  title="הוסף תורן למשמרת בוקר"
+                                >
+                                  <Plus size={13} /> הוסף תורן
+                                </button>
                               </div>
-                            ))}
+                            )}
+
+                            {(day.morning || []).map((s, idx) => {
+                              const isSlotEdited = s.isEdited || s.isAdded || (s.originalName && (s.name !== s.originalName || s.department !== s.originalDepartment));
+                              return (
+                                <div 
+                                  key={idx} 
+                                  style={{ 
+                                    padding: '0.5rem', 
+                                    borderBottom: idx < day.morning.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', 
+                                    cursor: 'pointer', 
+                                    backgroundColor: isSlotEdited ? 'rgba(16, 185, 129, 0.22)' : 'rgba(255,255,255,0.02)',
+                                    borderRight: isSlotEdited ? '3px solid #10B981' : 'none',
+                                    transition: 'all 0.2s' 
+                                  }} 
+                                  onClick={() => setEditingShift({ dayIdx, shiftTime: 'morning', idx, oldPerson: s })} 
+                                  title="לחץ להחלפה או להסרת התורן"
+                                >
+                                   {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'morning' && editingShift?.idx === idx ? (
+                                     <select 
+                                        autoFocus
+                                        onBlur={() => setEditingShift(null)}
+                                        onChange={(e) => {
+                                          if (e.target.value === '__REMOVE__') {
+                                            handleRemoveSoldierFromShift(dayIdx, 'morning', idx, s);
+                                          } else if (e.target.value) {
+                                            handleBaltamChange(dayIdx, 'morning', idx, s, e.target.value);
+                                          }
+                                        }}
+                                        style={{ width: '100%', padding: '0.25rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
+                                     >
+                                       <option value="">בחר מחליף...</option>
+                                       <option value="__REMOVE__" style={{ color: '#ef4444', fontWeight: 'bold' }}>❌ הסר תורן ממשמרת זו</option>
+                                       {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
+                                         <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
+                                           {soldier.name} ({d.departmentName})
+                                         </option>
+                                       )))}
+                                     </select>
+                                   ) : (
+                                     <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.35rem', color: isSlotEdited ? '#34d399' : 'var(--text-primary)', fontWeight: isSlotEdited ? 600 : 'normal' }}>
+                                       {s.name} <span style={{ fontSize: '0.75rem', opacity: isSlotEdited ? 0.9 : 0.6 }}>({s.department})</span>
+                                       {isSlotEdited ? (
+                                         <span style={{ fontSize: '0.68rem', backgroundColor: 'rgba(16, 185, 129, 0.35)', color: '#a7f3d0', padding: '0.1rem 0.35rem', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.5)' }}>
+                                           עודכן
+                                         </span>
+                                       ) : (
+                                         <span>✏️</span>
+                                       )}
+                                     </span>
+                                   )}
+                                </div>
+                              );
+                            })}
+
+                            {/* טופס הוספת תורן בוקר */}
+                            {addingShift?.dayIdx === dayIdx && addingShift?.shiftTime === 'morning' ? (
+                              <div style={{ padding: '0.5rem', backgroundColor: 'rgba(99, 102, 241, 0.15)', border: '1px solid var(--primary-color)', borderRadius: '4px', margin: '0.25rem', textAlign: 'right' }}>
+                                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--primary-color)', marginBottom: '0.3rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span>הוספת תורן בוקר:</span>
+                                  <button type="button" onClick={() => setAddingShift(null)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.85rem' }}>✕</button>
+                                </div>
+                                <select
+                                  autoFocus
+                                  defaultValue=""
+                                  onChange={(e) => {
+                                    if (e.target.value) handleAddSoldierToShift(dayIdx, 'morning', e.target.value);
+                                  }}
+                                  style={{ width: '100%', padding: '0.25rem', backgroundColor: '#222', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px', fontSize: '0.82rem' }}
+                                >
+                                  <option value="">בחר חייל להוספה...</option>
+                                  {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
+                                    <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
+                                      {soldier.name} ({d.departmentName})
+                                    </option>
+                                  )))}
+                                </select>
+                              </div>
+                            ) : (
+                              day.morning && day.morning.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setAddingShift({ dayIdx, shiftTime: 'morning' })}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '0.25rem',
+                                    width: '100%',
+                                    padding: '0.3rem 0.5rem',
+                                    fontSize: '0.72rem',
+                                    backgroundColor: 'transparent',
+                                    border: 'none',
+                                    borderTop: '1px dashed rgba(255, 255, 255, 0.08)',
+                                    color: 'var(--primary-color)',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s',
+                                    opacity: 0.85
+                                  }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(99, 102, 241, 0.1)'; e.currentTarget.style.opacity = '1'; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.opacity = '0.85'; }}
+                                  title="הוסף תורן נוסף למשמרת בוקר"
+                                >
+                                  <Plus size={12} /> הוסף תורן
+                                </button>
+                              )
+                            )}
                           </td>
+
+                          {/* עמודת ערב */}
                           <td style={{ padding: '0', borderBottom: '1px solid rgba(255,255,255,0.05)', verticalAlign: 'top' }}>
-                            {day.evening.length === 0 ? <div style={{ padding: '0.5rem' }}>-</div> : day.evening.map((s, idx) => (
-                              <div key={idx} style={{ padding: '0.5rem', borderBottom: idx < day.evening.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.02)', transition: 'all 0.2s' }} onClick={() => setEditingShift({ dayIdx, shiftTime: 'evening', idx, oldPerson: s })} title="לחץ להחלפה">
-                                 {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'evening' && editingShift?.idx === idx ? (
-                                   <select 
-                                      autoFocus
-                                      onBlur={() => setEditingShift(null)}
-                                      onChange={(e) => handleBaltamChange(dayIdx, 'evening', idx, s, e.target.value)}
-                                      style={{ width: '100%', padding: '0.2rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
-                                   >
-                                     <option value="">בחר מחליף...</option>
-                                     {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
-                                       <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
-                                         {soldier.name} ({d.departmentName})
-                                       </option>
-                                     )))}
-                                   </select>
-                                 ) : (
-                                   <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.25rem', color: 'var(--text-primary)' }}>
-                                     {s.name} <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>({s.department})</span> ✏️
-                                   </span>
-                                 )}
+                            {(!day.evening || day.evening.length === 0) && !(addingShift?.dayIdx === dayIdx && addingShift?.shiftTime === 'evening') && (
+                              <div style={{ padding: '0.6rem 0.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }}>
+                                <span style={{ opacity: 0.35, fontSize: '0.9rem' }}>-</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setAddingShift({ dayIdx, shiftTime: 'evening' })}
+                                  className="btn btn-secondary"
+                                  style={{
+                                    padding: '0.2rem 0.55rem',
+                                    fontSize: '0.75rem',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    borderColor: 'rgba(99, 102, 241, 0.4)',
+                                    color: 'var(--primary-color)'
+                                  }}
+                                  title="הוסף תורן למשמרת ערב"
+                                >
+                                  <Plus size={13} /> הוסף תורן
+                                </button>
                               </div>
-                            ))}
+                            )}
+
+                            {(day.evening || []).map((s, idx) => {
+                              const isSlotEdited = s.isEdited || s.isAdded || (s.originalName && (s.name !== s.originalName || s.department !== s.originalDepartment));
+                              return (
+                                <div 
+                                  key={idx} 
+                                  style={{ 
+                                    padding: '0.5rem', 
+                                    borderBottom: idx < day.evening.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', 
+                                    cursor: 'pointer', 
+                                    backgroundColor: isSlotEdited ? 'rgba(16, 185, 129, 0.22)' : 'rgba(255,255,255,0.02)',
+                                    borderRight: isSlotEdited ? '3px solid #10B981' : 'none',
+                                    transition: 'all 0.2s' 
+                                  }} 
+                                  onClick={() => setEditingShift({ dayIdx, shiftTime: 'evening', idx, oldPerson: s })} 
+                                  title="לחץ להחלפה או להסרת התורן"
+                                >
+                                   {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'evening' && editingShift?.idx === idx ? (
+                                     <select 
+                                        autoFocus
+                                        onBlur={() => setEditingShift(null)}
+                                        onChange={(e) => {
+                                          if (e.target.value === '__REMOVE__') {
+                                            handleRemoveSoldierFromShift(dayIdx, 'evening', idx, s);
+                                          } else if (e.target.value) {
+                                            handleBaltamChange(dayIdx, 'evening', idx, s, e.target.value);
+                                          }
+                                        }}
+                                        style={{ width: '100%', padding: '0.25rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
+                                     >
+                                       <option value="">בחר מחליף...</option>
+                                       <option value="__REMOVE__" style={{ color: '#ef4444', fontWeight: 'bold' }}>❌ הסר תורן ממשמרת זו</option>
+                                       {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
+                                         <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
+                                           {soldier.name} ({d.departmentName})
+                                         </option>
+                                       )))}
+                                     </select>
+                                   ) : (
+                                     <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.35rem', color: isSlotEdited ? '#34d399' : 'var(--text-primary)', fontWeight: isSlotEdited ? 600 : 'normal' }}>
+                                       {s.name} <span style={{ fontSize: '0.75rem', opacity: isSlotEdited ? 0.9 : 0.6 }}>({s.department})</span>
+                                       {isSlotEdited ? (
+                                         <span style={{ fontSize: '0.68rem', backgroundColor: 'rgba(16, 185, 129, 0.35)', color: '#a7f3d0', padding: '0.1rem 0.35rem', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.5)' }}>
+                                           עודכן
+                                         </span>
+                                       ) : (
+                                         <span>✏️</span>
+                                       )}
+                                     </span>
+                                   )}
+                                </div>
+                              );
+                            })}
+
+                            {/* טופס הוספת תורן ערב */}
+                            {addingShift?.dayIdx === dayIdx && addingShift?.shiftTime === 'evening' ? (
+                              <div style={{ padding: '0.5rem', backgroundColor: 'rgba(99, 102, 241, 0.15)', border: '1px solid var(--primary-color)', borderRadius: '4px', margin: '0.25rem', textAlign: 'right' }}>
+                                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--primary-color)', marginBottom: '0.3rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span>הוספת תורן ערב:</span>
+                                  <button type="button" onClick={() => setAddingShift(null)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.85rem' }}>✕</button>
+                                </div>
+                                <select
+                                  autoFocus
+                                  defaultValue=""
+                                  onChange={(e) => {
+                                    if (e.target.value) handleAddSoldierToShift(dayIdx, 'evening', e.target.value);
+                                  }}
+                                  style={{ width: '100%', padding: '0.25rem', backgroundColor: '#222', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px', fontSize: '0.82rem' }}
+                                >
+                                  <option value="">בחר חייל להוספה...</option>
+                                  {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
+                                    <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
+                                      {soldier.name} ({d.departmentName})
+                                    </option>
+                                  )))}
+                                </select>
+                              </div>
+                            ) : (
+                              day.evening && day.evening.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setAddingShift({ dayIdx, shiftTime: 'evening' })}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '0.25rem',
+                                    width: '100%',
+                                    padding: '0.3rem 0.5rem',
+                                    fontSize: '0.72rem',
+                                    backgroundColor: 'transparent',
+                                    border: 'none',
+                                    borderTop: '1px dashed rgba(255, 255, 255, 0.08)',
+                                    color: 'var(--primary-color)',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s',
+                                    opacity: 0.85
+                                  }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(99, 102, 241, 0.1)'; e.currentTarget.style.opacity = '1'; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.opacity = '0.85'; }}
+                                  title="הוסף תורן נוסף למשמרת ערב"
+                                >
+                                  <Plus size={12} /> הוסף תורן
+                                </button>
+                              )
+                            )}
                           </td>
                         </tr>
                       );
@@ -1150,14 +1875,26 @@ const ManagerScreen = () => {
                         </div>
                       </div>
 
-                      <button 
-                        onClick={handleUnlockForEdit} 
-                        className="btn btn-secondary" 
-                        style={{ fontSize: '0.85rem', padding: '0.45rem 1rem', display: 'flex', alignItems: 'center', gap: '0.4rem', borderColor: 'rgba(255,255,255,0.2)' }}
-                        title="פתח מחדש לעריכה אם התרחש בלת״ם של הרגע האחרון"
-                      >
-                        <Unlock size={14} /> פתח לעריכה מחודשת
-                      </button>
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <button 
+                          onClick={handleUnlockForEdit} 
+                          className="btn btn-secondary" 
+                          style={{ fontSize: '0.85rem', padding: '0.45rem 1rem', display: 'flex', alignItems: 'center', gap: '0.4rem', borderColor: 'rgba(255,255,255,0.2)' }}
+                          title="פתח מחדש לעריכה אם התרחש בלת״ם של הרגע האחרון"
+                        >
+                          <Unlock size={14} /> פתח לעריכה מחודשת
+                        </button>
+
+                        <button 
+                          type="button"
+                          onClick={() => setShowResetModal(true)} 
+                          className="btn btn-secondary" 
+                          style={{ fontSize: '0.85rem', padding: '0.45rem 1rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#f87171', borderColor: 'rgba(239,68,68,0.3)' }}
+                          title="איפוס טבלת הצדק וביטול צבירת המשמרות"
+                        >
+                          <RotateCcw size={14} /> איפוס צבירת צדק
+                        </button>
+                      </div>
                     </div>
 
                     <div style={{ backgroundColor: 'rgba(0,0,0,0.25)', borderRadius: '8px', padding: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', border: '1px solid rgba(255,255,255,0.05)' }}>
@@ -1235,6 +1972,532 @@ const ManagerScreen = () => {
         </div>
 
       </div>
+      )}
+
+      {/* טאב 2: טבלת צדק חודשית & אתר קשר */}
+      {activeTab === 'justice' && (
+        <div className="animate-fade-in" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+          
+          {/* כותרת עליונה של טבלת הצדק עם כפתור איפוס */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', backgroundColor: 'rgba(255,255,255,0.02)', padding: '1rem 1.25rem', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div>
+              <h4 style={{ margin: 0, fontSize: '1.3rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Scale color="var(--secondary-color)" size={24} /> ניהול טבלת צדק חודשית & אתר קשר
+              </h4>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                מעקב עומסים מצטבר, שקלול ימי קשר וסנכרון לאלגוריתם השיבוץ
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowResetModal(true)}
+              className="btn"
+              style={{
+                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                color: '#f87171',
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                padding: '0.55rem 1.15rem',
+                fontSize: '0.9rem',
+                fontWeight: 600,
+                borderRadius: '8px',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.25)'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.15)'}
+            >
+              <RotateCcw size={16} /> איפוס טבלת הצדק
+            </button>
+          </div>
+
+          {resetSuccessMsg && (
+            <div className="glass-panel animate-fade-in" style={{ borderColor: 'rgba(16, 185, 129, 0.4)', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--secondary-color)', padding: '0.85rem 1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, borderRadius: '8px' }}>
+              <CheckCircle2 size={18} /> טבלת הצדק אופסה בהצלחה! כל המונים אופסו ל-0 וחתימת השבצ״ק בוטלה.
+            </div>
+          )}
+
+          {/* כרטיסי סיכום חודשיים (KPIs) */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+            <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'center', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.4rem' }}>משמרות מטבח שבוצעו</span>
+              <strong style={{ fontSize: '2rem', color: 'var(--primary-color)' }}>{totalKitchenShifts}</strong>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.2rem' }}>מצטבר חודשי</span>
+            </div>
+
+            <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'center', borderRadius: '10px', border: '1px solid rgba(14, 165, 233, 0.35)', backgroundColor: 'rgba(14, 165, 233, 0.05)' }}>
+              <span style={{ fontSize: '0.85rem', color: '#38bdf8', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem', marginBottom: '0.4rem' }}>
+                <Radio size={16} /> ימים באתר קשר
+              </span>
+              <strong style={{ fontSize: '2rem', color: '#38bdf8' }}>{totalKesherDays}</strong>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.2rem' }}>1.5 ימים = 1 מטבח (+0.5 לעודף)</span>
+            </div>
+
+            <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'center', borderRadius: '10px', border: '1px solid rgba(16, 185, 129, 0.35)', backgroundColor: 'rgba(16, 185, 129, 0.05)' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--secondary-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem', marginBottom: '0.4rem' }}>
+                <Scale size={16} /> סה״כ משוקלל לצדק
+              </span>
+              <strong style={{ fontSize: '2rem', color: 'var(--secondary-color)' }}>{totalEffectiveShifts}</strong>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.2rem' }}>מטבח + ימי קשר משוקללים</span>
+            </div>
+
+            <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'center', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.4rem' }}>ממוצע משמרות לחייל</span>
+              <strong style={{ fontSize: '2rem', color: 'white' }}>{avgShiftsPerSoldier}</strong>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.2rem' }}>
+                מתוך {allSoldiersList.length} חיילים פעילים {fullExemptCount > 0 && `(${fullExemptCount} בפטור מלא הוחרגו)`}
+              </span>
+            </div>
+          </div>
+
+          {/* סקציה 1: ניהול ורישום אתר קשר */}
+          <div className="glass-panel" style={{ borderColor: 'rgba(14, 165, 233, 0.4)', position: 'relative' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <h4 style={{ margin: 0, fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#38bdf8' }}>
+                <Radio size={22} /> ניהול ורישום שהייה ב״אתר קשר״
+              </h4>
+              <span style={{ fontSize: '0.82rem', padding: '0.2rem 0.7rem', borderRadius: '12px', backgroundColor: 'rgba(14, 165, 233, 0.15)', color: '#38bdf8', border: '1px solid rgba(14, 165, 233, 0.3)' }}>
+                1.5 ימים בקשר = 1 תורנות מטבח (יום עודף = 0.5)
+              </span>
+            </div>
+
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '1.25rem', lineHeight: '1.5', textAlign: 'right' }}>
+              כאן מזינים חיילים ששירתו באתר הקשר. <strong>כל יום וחצי (1.5) באתר קשר שווה ל-1 משמרת מטבח</strong>. אם כמות הימים אינה מתחלקת ב-1.5, כל יום עודף נספר כחצי (0.5) משמרת מטבח (למשל: 4 ימים בקשר = 2.5 משמרות מטבח). הנתונים מתווספים לטבלת הצדק החודשית <strong>ומשוקללים באלגוריתם של השבוע הבא</strong> כך שהחייל יקבל עדיפות מוגנת למנוחה.
+            </p>
+
+            {/* טופס הוספה */}
+            <form onSubmit={handleAddKesher} style={{ backgroundColor: 'rgba(255,255,255,0.03)', padding: '1.25rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '1.5rem' }}>
+              <h5 style={{ margin: '0 0 1rem 0', fontSize: '1rem', color: 'var(--text-primary)' }}>+ הוספת שהייה באתר קשר לחייל</h5>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>חייל ומחלקה:</label>
+                  <select
+                    value={kesherSoldierKey}
+                    onChange={(e) => setKesherSoldierKey(e.target.value)}
+                    className="input-field"
+                    style={{ width: '100%', margin: 0, padding: '0.5rem' }}
+                    required
+                  >
+                    <option value="">בחר חייל מהמאגר...</option>
+                    {allSoldiersList.map(s => (
+                      <option key={s.key} value={s.key}>
+                        {s.name} ({s.department}) - סה״כ כעת: {s.effectiveTotal}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>כמות ימים באתר קשר:</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="60"
+                    value={kesherDaysCount}
+                    onChange={(e) => setKesherDaysCount(e.target.value)}
+                    className="input-field"
+                    style={{ width: '100%', margin: 0, padding: '0.5rem' }}
+                    placeholder="למשל: 3"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>תאריך שהייה:</label>
+                  <input
+                    type="date"
+                    value={kesherDate}
+                    onChange={(e) => setKesherDate(e.target.value)}
+                    className="input-field"
+                    style={{ width: '100%', margin: 0, padding: '0.5rem' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>הערה (אופציונלי):</label>
+                  <input
+                    type="text"
+                    value={kesherNote}
+                    onChange={(e) => setKesherNote(e.target.value)}
+                    className="input-field"
+                    style={{ width: '100%', margin: 0, padding: '0.5rem' }}
+                    placeholder="למשל: תגבור מוצב, שבוע קשר"
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <button
+                  type="submit"
+                  disabled={kesherSubmitting}
+                  className="btn"
+                  style={{ backgroundColor: '#0284c7', borderColor: '#0284c7', padding: '0.6rem 1.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'white', fontWeight: 600 }}
+                >
+                  <Plus size={18} />
+                  {kesherSubmitting ? 'שומר...' : 'הוסף לטבלת הצדק'}
+                </button>
+
+                {kesherSuccessMsg && (
+                  <span className="animate-fade-in" style={{ color: 'var(--secondary-color)', fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <CheckCircle2 size={16} /> {kesherSuccessMsg}
+                  </span>
+                )}
+              </div>
+            </form>
+
+            {/* רשימת רשומות אתר קשר קיימות */}
+            <h5 style={{ margin: '0 0 0.75rem 0', fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
+              רישומי אתר קשר פעילים ({kesherEntries.length})
+            </h5>
+            
+            {kesherEntries.length === 0 ? (
+              <div style={{ padding: '1.25rem', textAlign: 'center', color: 'var(--text-secondary)', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '6px' }}>
+                אין עדיין רישומי אתר קשר במערכת. השתמש בטופס למעלה כדי להוסיף.
+              </div>
+            ) : (
+              <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', fontSize: '0.88rem' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '0.5rem' }}>חייל</th>
+                      <th style={{ padding: '0.5rem' }}>מחלקה</th>
+                      <th style={{ padding: '0.5rem' }}>ימים בקשר</th>
+                      <th style={{ padding: '0.5rem' }}>תאריך / הערה</th>
+                      <th style={{ padding: '0.5rem' }}>מחיקה</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {kesherEntries.map(entry => (
+                      <tr key={entry.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                        <td style={{ padding: '0.5rem', fontWeight: 600 }}>{entry.soldierName}</td>
+                        <td style={{ padding: '0.5rem', color: 'var(--text-secondary)' }}>{entry.department}</td>
+                        <td style={{ padding: '0.5rem' }}>
+                          <span style={{ backgroundColor: 'rgba(14, 165, 233, 0.2)', color: '#38bdf8', padding: '0.15rem 0.5rem', borderRadius: '4px', fontWeight: 'bold' }}>
+                            {entry.daysCount} ימים ({kesherDaysToKitchenShifts(entry.daysCount)} מטבח)
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                          {entry.date ? `${entry.date} ` : ''}{entry.note ? `(${entry.note})` : ''}
+                        </td>
+                        <td style={{ padding: '0.5rem' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteKesher(entry.id)}
+                            style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer', padding: '0.2rem' }}
+                            title="מחק רישום זה"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* סקציה 2: טבלת הצדק החודשית המלאה */}
+          <div className="glass-panel" style={{ width: '100%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Scale color="var(--secondary-color)" size={22} /> טבלת צדק חודשית מצטברת (חיילים פעילים)
+                </h4>
+                {fullExemptCount > 0 && (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.2rem' }}>
+                    * {fullExemptCount} חיילים בעלי פטור מלא הוסרו אוטומטית מטבלת הצדק
+                  </span>
+                )}
+              </div>
+
+              {/* כפתור איפוס ושורת חיפוש */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowResetModal(true)}
+                  className="btn"
+                  style={{
+                    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                    color: '#f87171',
+                    border: '1px solid rgba(239, 68, 68, 0.35)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    padding: '0.35rem 0.75rem',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    borderRadius: '6px',
+                    cursor: 'pointer'
+                  }}
+                  title="איפוס טבלת הצדק"
+                >
+                  <RotateCcw size={14} /> איפוס טבלה
+                </button>
+
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    placeholder="חיפוש חייל..."
+                    value={justiceSearch}
+                    onChange={(e) => setJusticeSearch(e.target.value)}
+                    className="input-field"
+                    style={{ margin: 0, padding: '0.35rem 0.75rem', fontSize: '0.85rem', width: '160px' }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* פילטרים לפי מחלקות */}
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+              {['all', 'תקשוב', 'לוגיסטיקה', 'טנ"א', 'משא"ן'].map(dep => (
+                <button
+                  key={dep}
+                  type="button"
+                  onClick={() => setJusticeDeptFilter(dep)}
+                  className="btn btn-secondary"
+                  style={{
+                    padding: '0.3rem 0.8rem',
+                    fontSize: '0.85rem',
+                    backgroundColor: justiceDeptFilter === dep ? 'var(--primary-color)' : 'rgba(255,255,255,0.04)',
+                    color: justiceDeptFilter === dep ? 'white' : 'var(--text-secondary)',
+                    borderColor: justiceDeptFilter === dep ? 'var(--primary-color)' : 'transparent'
+                  }}
+                >
+                  {dep === 'all' ? 'כל המחלקות' : dep}
+                </button>
+              ))}
+            </div>
+
+            {/* טבלה מפורטת */}
+            <div style={{ overflowX: 'auto', backgroundColor: 'rgba(0,0,0,0.2)', padding: '0.75rem', borderRadius: '8px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', fontSize: '0.9rem' }}>
+                <thead>
+                  <tr style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
+                    <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>שם החייל</th>
+                    <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>מחלקה</th>
+                    <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>מטבח אמצ״ש</th>
+                    <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>מטבח סופ״ש</th>
+                    <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#38bdf8' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.25rem' }}>
+                        <Radio size={15} /> אתר קשר (ימים)
+                      </span>
+                    </th>
+                    <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', color: 'var(--secondary-color)', fontWeight: 'bold' }}>
+                      סה״כ לצדק
+                    </th>
+                    <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>סטטוס עומס</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredAndSortedJusticeList.length === 0 ? (
+                    <tr>
+                      <td colSpan="7" style={{ padding: '1.5rem', color: 'var(--text-secondary)' }}>לא נמצאו חיילים התואמים לחיפוש.</td>
+                    </tr>
+                  ) : (
+                    filteredAndSortedJusticeList.map(s => {
+                      const depColors = { 'תקשוב': '#38bdf8', 'לוגיסטיקה': '#facc15', 'טנ"א': '#4ade80', 'משא"ן': '#f472b6' };
+                      const depColor = depColors[s.department] || 'var(--text-secondary)';
+                      
+                      const avg = Number(avgShiftsPerSoldier) || 0;
+                      let loadBadge = { text: 'תקין', bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: 'rgba(59, 130, 246, 0.3)' };
+                      if (s.effectiveTotal < avg - 0.75) {
+                        loadBadge = { text: 'עומס קל', bg: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: 'rgba(16, 185, 129, 0.3)' };
+                      } else if (s.effectiveTotal > avg + 0.75) {
+                        loadBadge = { text: 'עמוס', bg: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: 'rgba(245, 158, 11, 0.3)' };
+                      }
+
+                      return (
+                        <tr key={s.key} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                          <td style={{ padding: '0.65rem 0.5rem', fontWeight: 600 }}>{s.name}</td>
+                          <td style={{ padding: '0.65rem 0.5rem' }}>
+                            <span style={{ color: depColor, fontWeight: 500 }}>{s.department}</span>
+                          </td>
+                          <td style={{ padding: '0.65rem 0.5rem' }}>{s.midweek}</td>
+                          <td style={{ padding: '0.65rem 0.5rem' }}>{s.weekend}</td>
+                          <td style={{ padding: '0.65rem 0.5rem' }}>
+                            {s.kesherDays > 0 ? (
+                              <span style={{ backgroundColor: 'rgba(14, 165, 233, 0.2)', color: '#38bdf8', padding: '0.2rem 0.55rem', borderRadius: '4px', fontWeight: 'bold' }} title={`${s.kesherDays} ימים באתר קשר = שווה ערך ל-${s.kesherEquiv} משמרות מטבח`}>
+                                {s.kesherDays} ימים ({s.kesherEquiv} מטבח)
+                              </span>
+                            ) : (
+                              <span style={{ opacity: 0.35 }}>0</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.65rem 0.5rem', fontWeight: 'bold', fontSize: '1.05rem', color: 'var(--secondary-color)' }}>
+                            {s.effectiveTotal}
+                          </td>
+                          <td style={{ padding: '0.65rem 0.5rem' }}>
+                            <span style={{ fontSize: '0.75rem', padding: '0.15rem 0.5rem', borderRadius: '10px', backgroundColor: loadBadge.bg, color: loadBadge.color, border: `1px solid ${loadBadge.border}`, fontWeight: 500 }}>
+                              {loadBadge.text}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* מודאל אישור מפורט לאיפוס טבלת הצדק (בטוח?) */}
+      {showResetModal && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.82)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 99999,
+            padding: '1rem',
+            direction: 'rtl'
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isResetting) setShowResetModal(false);
+          }}
+        >
+          <div 
+            className="glass-panel animate-fade-in"
+            style={{
+              maxWidth: '520px',
+              width: '100%',
+              backgroundColor: '#1e293b',
+              border: '2px solid rgba(239, 68, 68, 0.6)',
+              borderRadius: '16px',
+              padding: '1.75rem',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+              position: 'relative'
+            }}
+          >
+            {/* אייקון אזהרה וכותרת */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '1.25rem' }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                border: '2px solid rgba(239, 68, 68, 0.4)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#ef4444',
+                flexShrink: 0
+              }}>
+                <AlertTriangle size={26} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.3rem', color: '#f87171' }}>
+                  איפוס טבלת הצדק - וידוא פעולה
+                </h3>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  האם אתה בטוח שברצונך לאפס? פעולה זו תנקה נתונים שנצברו
+                </span>
+              </div>
+            </div>
+
+            <div style={{ fontSize: '0.95rem', color: 'var(--text-primary)', lineHeight: '1.6', marginBottom: '1.25rem' }}>
+              <p style={{ margin: '0 0 0.85rem 0' }}>
+                דיווחת כי הוכנס בטעות שבצ״ק לא רלוונטי לטבלה. איפוס הטבלה יחזיר את ממוצעי העומסים למצב נקי.
+              </p>
+              
+              <div style={{
+                backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                borderRadius: '8px',
+                padding: '0.9rem 1.1rem',
+                fontSize: '0.9rem',
+                color: 'var(--text-secondary)',
+                marginBottom: '1rem'
+              }}>
+                <strong style={{ color: '#f87171', display: 'block', marginBottom: '0.4rem' }}>
+                  פעולה זו תבצע:
+                </strong>
+                <ul style={{ margin: 0, paddingRight: '1.2rem', lineHeight: '1.6' }}>
+                  <li>איפוס כל <strong>{totalKitchenShifts}</strong> משמרות המטבח שנצברו בטבלה ל-0.</li>
+                  <li>ביטול נעילת וחתימת השבצ״ק הלא רלוונטי (כך שלא ישפיע על השבועות הבאים).</li>
+                  <li>החזרת כל החיילים למצב עומס התחלתי שוויוני (0 תורנויות).</li>
+                </ul>
+              </div>
+
+              {/* אפשרויות מתקדמות */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', backgroundColor: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem 1rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', cursor: 'pointer', margin: 0, fontSize: '0.88rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={resetKesherAlso}
+                    onChange={(e) => setResetKesherAlso(e.target.checked)}
+                    style={{ width: '18px', height: '18px', accentColor: '#ef4444', cursor: 'pointer' }}
+                  />
+                  <span style={{ color: resetKesherAlso ? '#f87171' : 'var(--text-primary)', fontWeight: resetKesherAlso ? 600 : 400 }}>
+                    לאפס גם את רישומי ימי ״אתר קשר״ ({totalKesherDays} ימים רשומים)
+                  </span>
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', cursor: 'pointer', margin: 0, fontSize: '0.88rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={resetScheduleAlso}
+                    onChange={(e) => setResetScheduleAlso(e.target.checked)}
+                    style={{ width: '18px', height: '18px', accentColor: '#ef4444', cursor: 'pointer' }}
+                  />
+                  <span style={{ color: resetScheduleAlso ? '#f87171' : 'var(--text-primary)', fontWeight: resetScheduleAlso ? 600 : 400 }}>
+                    למחוק גם את לוח השבצ״ק מהתצוגה (מאפשר הפקת שיבוץ חדש לגמרי מאפס)
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {/* כפתורי פעולה ווידוא סופי */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                disabled={isResetting}
+                className="btn btn-secondary"
+                style={{ padding: '0.65rem 1.3rem', fontSize: '0.95rem' }}
+              >
+                ביטול
+              </button>
+
+              <button
+                type="button"
+                onClick={handleResetJusticeTable}
+                disabled={isResetting}
+                className="btn"
+                style={{
+                  backgroundColor: '#dc2626',
+                  borderColor: '#dc2626',
+                  color: 'white',
+                  fontWeight: 'bold',
+                  padding: '0.65rem 1.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  fontSize: '0.95rem',
+                  boxShadow: '0 4px 14px rgba(220, 38, 38, 0.4)'
+                }}
+              >
+                <RotateCcw size={17} />
+                {isResetting ? 'מאפס כעת...' : 'בטוח! אפס את הטבלה עכשיו'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

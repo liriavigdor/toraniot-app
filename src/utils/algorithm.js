@@ -23,6 +23,29 @@ const getWeekNumber = (d) => {
   return Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
 };
 
+/**
+ * המרת ימי שהייה באתר קשר למשמרות מטבח:
+ * כל יום וחצי (1.5) שווה למשמרת מטבח אחת.
+ * אם לא מתחלק (למשל 4 ימים = 3 ימים שזה 2 מטבחים + יום נוסף), היום הנוסף שווה חצי מטבח (0.5) -> סה״כ 2.5
+ */
+export const kesherDaysToKitchenShifts = (days) => {
+  const d = Number(days);
+  if (!d || isNaN(d) || d <= 0) return 0;
+  
+  // בדיקה אם מתחלק במדויק ב-1.5 (למשל 1.5, 3, 4.5, 6, 9)
+  const divided = d / 1.5;
+  if (Math.abs(divided - Math.round(divided)) < 0.0001) {
+    return Math.round(divided);
+  }
+  
+  // אם לא מתחלק במדויק ב-1.5:
+  // כל 3 ימים שווים 2 משמרות מטבח.
+  // יום נוסף שנותר שווה 0.5 משמרת מטבח (למשל 4 ימים -> 2 + 0.5 = 2.5)
+  const fullTriplets = Math.floor(d / 3);
+  const remainder = d % 3;
+  return fullTriplets * 2 + (remainder * 0.5);
+};
+
 const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides = {}, kitchenOverrides = {}, historyData = {}, seed = 0) => {
   let eligibleSoldiers = [];
   let totalExemptions = 0;
@@ -40,17 +63,19 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
       const hardBlockedDays = constraintOverride === 'critical' ? activeBlockedDays : [];
       
       const soldierKey = `${s.name}_${dep.departmentName}`;
-      const history = historyData[soldierKey] || { total: 0, weekend: 0, midweek: 0 };
+      const history = historyData[soldierKey] || { total: 0, weekend: 0, midweek: 0, kesherDays: 0 };
 
-      let virtTotal = history.total;
-      let virtMid = history.midweek;
-      let virtWeek = history.weekend;
+      const kesherDays = history.kesherDays || 0;
+      const kesherEquiv = kesherDaysToKitchenShifts(kesherDays);
+      let virtTotal = (history.effectiveTotal !== undefined ? history.effectiveTotal : (history.total || 0) + kesherEquiv);
+      let virtMid = (history.effectiveMidweek !== undefined ? history.effectiveMidweek : (history.midweek || 0) + kesherEquiv);
+      let virtWeek = history.weekend || 0;
       
       if (s.isNewSoldier) {
         // "שבוע חסד" - לחייל חדש יוגדר כאילו ביצע משמרת 1 כדי שלא יידפק מול הותיקים שצברו 0 משמרות
-        virtTotal = 1;
-        virtMid = 1;
-        virtWeek = 1;
+        virtTotal = Math.max(virtTotal, 1);
+        virtMid = Math.max(virtMid, 1);
+        virtWeek = Math.max(virtWeek, 1);
       }
 
       if (activeExceptionType === 'full') {
@@ -72,6 +97,7 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
           midweekShifts: virtMid,
           weekendShifts: virtWeek,
           totalShifts: virtTotal,
+          kesherDays: kesherDays,
           lastDayAssigned: -99,
           assignedDays: []
         });
@@ -458,6 +484,7 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
     soldiersState: eligibleSoldiers,
     considerations: [
       "✓ שוויון במסגרות הסופ״ש והאמצ״ש כערך עליון (נלמד מפידבק): המערכת שמה את ההגינות והשוויון בכמות המשמרות (בתוך אותה מסגרת - סופ״ש או אמצ״ש) בראש סדר העדיפויות, אפילו לפני הניסיון למנוע משמרות יום אחרי יום. זאת כדי להבטיח שאף אחד לא נשאר ריק בזמן שאחרים טוחנים.",
+      "✓ שקלול שהייה באתר קשר: כל 1.5 ימים באתר קשר נספרים כשווה ערך למשמרת מטבח (אם יש יום עודף שלא מתחלק, הוא נספר כחצי משמרת מטבח, למשל 4 ימים = 2.5 משמרות). חיילים ששירתו באתר קשר מקבלים עדיפות למנוחה ואינם משובצים לפני חיילים שטרם ביצעו תורנויות.",
       "✓ משקלים משמעותיים למניעת עומס חריג: למרות שהגינות חשובה, המערכת תסרב (ככל הניתן) לתת לאותו חייל משמרת כפולה בוקר+ערב, או 3 ימים ברצף, אלא אם אין שום פתרון אחר.",
       "✓ שחרור עומס הסופ״ש: יום חמישי מוגדר כעת כיום סופ״ש לכל דבר מבחינת סינון חיילים (רק סוגרי סופ״ש עולים בו), אך המשמרות בו נספרות כמשמרות סופ״ש כדי למנוע טחינה של חייל אחד.",
       "✓ שוויון סך כל המשמרות: משמש כשובר שוויון סופי כדי להבטיח צדק כללי במבט מלמעלה.",
