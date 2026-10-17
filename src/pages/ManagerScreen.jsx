@@ -25,6 +25,13 @@ const ManagerScreen = () => {
   const [feedbackText, setFeedbackText] = useState('');
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
   const [scheduleFilter, setScheduleFilter] = useState('all');
+  const [previewEditModal, setPreviewEditModal] = useState(null);
+  const [modalMode, setModalMode] = useState('select'); // 'select' | 'custom'
+  const [modalSoldierKey, setModalSoldierKey] = useState('');
+  const [modalCustomName, setModalCustomName] = useState('');
+  const [modalCustomDept, setModalCustomDept] = useState('לוגיסטיקה');
+  const [modalDayIdx, setModalDayIdx] = useState(0);
+  const [modalShiftTime, setModalShiftTime] = useState('morning');
 
   const [justiceData, setJusticeData] = useState(null);
   const [historyData, setHistoryData] = useState({});
@@ -149,6 +156,8 @@ const ManagerScreen = () => {
 
     try {
       const result = generateSchedule(kitchenData, departmentsData, managerOverrides, kitchenOverrides, combinedHistory);
+      result.originalSchedule = JSON.parse(JSON.stringify(result.schedule));
+      result.isManuallyModified = false;
       setAlgorithmResult(result);
       // במערכת אמיתית פה נייצר את ה-PDF ונשמור ל-Firebase
     } catch (error) {
@@ -158,6 +167,106 @@ const ManagerScreen = () => {
         setAlgorithmError({ message: 'אירעה שגיאה לא צפויה בעת הרצת האלגוריתם.', conflicts: [error.message] });
       }
     }
+  };
+
+  const openPreviewEdit = (dayIdx, shiftTime, slotIdx, soldier, dayShortName, dateStr, allowChooseDayAndShift = false) => {
+    setPreviewEditModal({
+      dayIdx,
+      shiftTime,
+      slotIdx,
+      soldier,
+      dayShortName,
+      dateStr,
+      allowChooseDayAndShift
+    });
+    setModalDayIdx(dayIdx);
+    setModalShiftTime(shiftTime);
+    setModalMode('select');
+    if (soldier) {
+      setModalCustomName(soldier.name || '');
+      setModalCustomDept(soldier.department || 'לוגיסטיקה');
+      setModalSoldierKey(`${soldier.name}__${soldier.department}`);
+    } else {
+      setModalCustomName('');
+      setModalCustomDept('לוגיסטיקה');
+      setModalSoldierKey('');
+    }
+  };
+
+  const handleSavePreviewEdit = () => {
+    const finalName = modalCustomName.trim();
+    if (!finalName || !algorithmResult) return;
+
+    const targetDayIdx = previewEditModal?.allowChooseDayAndShift ? modalDayIdx : previewEditModal.dayIdx;
+    const targetShiftTime = previewEditModal?.allowChooseDayAndShift ? modalShiftTime : previewEditModal.shiftTime;
+
+    setAlgorithmResult(prev => {
+      if (!prev) return prev;
+      const newSchedule = prev.schedule.map((day, dIdx) => {
+        if (dIdx !== targetDayIdx) return day;
+
+        const newDay = { ...day };
+        const shiftList = [...(newDay[targetShiftTime] || [])];
+
+        if (previewEditModal.slotIdx >= 0 && previewEditModal.slotIdx < shiftList.length && !previewEditModal.allowChooseDayAndShift) {
+          shiftList[previewEditModal.slotIdx] = {
+            ...shiftList[previewEditModal.slotIdx],
+            name: finalName,
+            department: modalCustomDept,
+            isEdited: true
+          };
+        } else {
+          shiftList.push({
+            name: finalName,
+            department: modalCustomDept,
+            isAgam: modalCustomDept === 'אג"ם' || modalCustomDept === 'אגם',
+            isEdited: true,
+            isAdded: true
+          });
+        }
+
+        newDay[targetShiftTime] = shiftList;
+        return newDay;
+      });
+
+      return {
+        ...prev,
+        schedule: newSchedule,
+        isManuallyModified: true
+      };
+    });
+
+    setPreviewEditModal(null);
+  };
+
+  const handleRemovePreviewSoldier = () => {
+    if (!algorithmResult || !previewEditModal || previewEditModal.slotIdx < 0) {
+      setPreviewEditModal(null);
+      return;
+    }
+
+    setAlgorithmResult(prev => {
+      if (!prev) return prev;
+      const newSchedule = prev.schedule.map((day, dIdx) => {
+        if (dIdx !== previewEditModal.dayIdx) return day;
+
+        const newDay = { ...day };
+        const shiftList = [...(newDay[previewEditModal.shiftTime] || [])];
+        if (previewEditModal.slotIdx >= 0 && previewEditModal.slotIdx < shiftList.length) {
+          shiftList.splice(previewEditModal.slotIdx, 1);
+        }
+        newDay[previewEditModal.shiftTime] = shiftList;
+        return newDay;
+      });
+
+      return {
+        ...prev,
+        schedule: newSchedule,
+        isManuallyModified: true
+      };
+    });
+
+    setPreviewEditModal(null);
   };
 
   const handleFeedbackSubmit = () => {
@@ -1234,9 +1343,61 @@ const ManagerScreen = () => {
                     </h5>
                     
                     {/* תצוגת PDF מקדימה (טבלה) */}
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-                      <button onClick={() => setScheduleFilter('all')} className="btn" style={{ padding: '0.4rem 1rem', backgroundColor: scheduleFilter === 'all' ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)' }}>הכל</button>
-                      <button onClick={() => setScheduleFilter('plasam')} className="btn" style={{ padding: '0.4rem 1rem', backgroundColor: scheduleFilter === 'plasam' ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)' }}>פלס״ם</button>
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: '0.35rem' }}>
+                        <button onClick={() => setScheduleFilter('all')} className="btn" style={{ padding: '0.4rem 1rem', backgroundColor: scheduleFilter === 'all' ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)' }}>הכל</button>
+                        <button onClick={() => setScheduleFilter('plasam')} className="btn" style={{ padding: '0.4rem 1rem', backgroundColor: scheduleFilter === 'plasam' ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)' }}>פלס״ם</button>
+                      </div>
+
+                      <button 
+                        type="button"
+                        onClick={() => openPreviewEdit(0, 'morning', -1, null, algorithmResult.schedule[0]?.shortName || "א'", formatDayDate(algorithmResult.schedule[0]?.shortName, weekStartDate), true)}
+                        className="btn btn-secondary"
+                        style={{ padding: '0.4rem 0.85rem', fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', borderColor: 'rgba(99, 102, 241, 0.4)' }}
+                        title="הוספת תורן חדש ליום ומשמרת לבחירתך"
+                      >
+                        <Plus size={15} color="var(--primary-color)" /> הוסף תורן לטבלה
+                      </button>
+
+                      {algorithmResult.isManuallyModified && (
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm('האם לשחזר את הטבלה לשיבוץ המקורי של האלגוריתם (ביטול כל העריכות הידניות)?')) {
+                              setAlgorithmResult(prev => ({
+                                ...prev,
+                                schedule: JSON.parse(JSON.stringify(prev.originalSchedule)),
+                                isManuallyModified: false
+                              }));
+                            }
+                          }}
+                          className="btn btn-secondary" 
+                          style={{ padding: '0.4rem 0.85rem', fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+                          title="שחזור השיבוץ המקורי כפי שחושב על ידי האלגוריתם"
+                        >
+                          <RotateCcw size={14} /> שחזר למקורי
+                        </button>
+                      )}
+                    </div>
+
+                    {/* טיפ הדרכה לעריכה מהירה */}
+                    <div style={{
+                      backgroundColor: 'rgba(99, 102, 241, 0.08)',
+                      border: '1px dashed rgba(99, 102, 241, 0.35)',
+                      borderRadius: '8px',
+                      padding: '0.55rem 0.85rem',
+                      marginBottom: '1rem',
+                      fontSize: '0.85rem',
+                      color: 'var(--text-primary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.45rem',
+                      maxWidth: '450px',
+                      margin: '0 auto 1rem auto'
+                    }}>
+                      <PenLine size={16} color="var(--primary-color)" style={{ flexShrink: 0 }} />
+                      <span><strong>עריכת מנהל מהירה:</strong> לחץ על כל שם בטבלה כדי לשנותו, להחליף חייל או למחוק תורן.</span>
                     </div>
                     
                     <div id="schedule-table-preview" className="pdf-preview" style={{ backgroundColor: 'white', color: 'black', padding: '1rem 1.5rem', borderRadius: '8px', textAlign: 'right', marginBottom: '1.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', fontSize: '0.95rem', width: '90%', maxWidth: '450px', margin: '0 auto' }}>
@@ -1263,10 +1424,12 @@ const ManagerScreen = () => {
                               const colors = { 'תקשוב': '#bae6fd', 'לוגיסטיקה': '#fef08a', 'טנ"א': '#bbf7d0', 'משא"ן': '#fbcfe8' };
                               return colors[depName] || '#f3f4f6';
                             };
-                            const filterShift = (shift) => shift.filter(s => scheduleFilter === 'all' || (scheduleFilter === 'plasam' && !s.isAgam));
                             
-                            const filteredMorning = filterShift(day.morning);
-                            const filteredEvening = filterShift(day.evening);
+                            const morningWithIdx = (day.morning || []).map((s, origIdx) => ({ ...s, origIdx }));
+                            const eveningWithIdx = (day.evening || []).map((s, origIdx) => ({ ...s, origIdx }));
+                            
+                            const filteredMorning = morningWithIdx.filter(s => scheduleFilter === 'all' || (scheduleFilter === 'plasam' && !s.isAgam));
+                            const filteredEvening = eveningWithIdx.filter(s => scheduleFilter === 'all' || (scheduleFilter === 'plasam' && !s.isAgam));
                             
                             // Align lengths so they match row by row visually
                             const maxRows = Math.max(filteredMorning.length, filteredEvening.length);
@@ -1285,16 +1448,94 @@ const ManagerScreen = () => {
                                 </td>
                                 <td style={{ padding: '0', border: '1px solid #ddd', verticalAlign: 'top', width: '39%' }}>
                                   {rows.map((_, i) => {
-                                    if (maxRows === 0) return <div key={i} style={{ padding: '0.4rem' }}>-</div>;
+                                    if (maxRows === 0) {
+                                      return (
+                                        <div 
+                                          key={i} 
+                                          onClick={() => openPreviewEdit(idx, 'morning', -1, null, day.shortName, dayDateStr)}
+                                          title="לחץ להוספת תורן בוקר"
+                                          style={{ padding: '0.4rem', cursor: 'pointer', color: '#888' }}
+                                        >
+                                          -
+                                        </div>
+                                      );
+                                    }
                                     const s = filteredMorning[i];
-                                    return s ? <div key={i} style={{ padding: '0.4rem', borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none', backgroundColor: getDepartmentColor(s.department) }}>{s.name}</div> : <div key={i} style={{ padding: '0.4rem', borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none' }}>&nbsp;</div>;
+                                    return s ? (
+                                      <div 
+                                        key={i} 
+                                        onClick={() => openPreviewEdit(idx, 'morning', s.origIdx, s, day.shortName, dayDateStr)}
+                                        title="לחץ לעריכת שם או החלפת תורן"
+                                        style={{ 
+                                          padding: '0.4rem', 
+                                          borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none', 
+                                          backgroundColor: getDepartmentColor(s.department),
+                                          cursor: 'pointer',
+                                          userSelect: 'none'
+                                        }}
+                                      >
+                                        {s.name}
+                                      </div>
+                                    ) : (
+                                      <div 
+                                        key={i} 
+                                        onClick={() => openPreviewEdit(idx, 'morning', -1, null, day.shortName, dayDateStr)}
+                                        title="לחץ להוספת תורן בוקר"
+                                        style={{ 
+                                          padding: '0.4rem', 
+                                          borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none',
+                                          cursor: 'pointer'
+                                        }}
+                                      >
+                                        &nbsp;
+                                      </div>
+                                    );
                                   })}
                                 </td>
                                 <td style={{ padding: '0', border: '1px solid #ddd', verticalAlign: 'top', width: '39%' }}>
                                   {rows.map((_, i) => {
-                                    if (maxRows === 0) return <div key={i} style={{ padding: '0.4rem' }}>-</div>;
+                                    if (maxRows === 0) {
+                                      return (
+                                        <div 
+                                          key={i} 
+                                          onClick={() => openPreviewEdit(idx, 'evening', -1, null, day.shortName, dayDateStr)}
+                                          title="לחץ להוספת תורן ערב"
+                                          style={{ padding: '0.4rem', cursor: 'pointer', color: '#888' }}
+                                        >
+                                          -
+                                        </div>
+                                      );
+                                    }
                                     const s = filteredEvening[i];
-                                    return s ? <div key={i} style={{ padding: '0.4rem', borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none', backgroundColor: getDepartmentColor(s.department) }}>{s.name}</div> : <div key={i} style={{ padding: '0.4rem', borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none' }}>&nbsp;</div>;
+                                    return s ? (
+                                      <div 
+                                        key={i} 
+                                        onClick={() => openPreviewEdit(idx, 'evening', s.origIdx, s, day.shortName, dayDateStr)}
+                                        title="לחץ לעריכת שם או החלפת תורן"
+                                        style={{ 
+                                          padding: '0.4rem', 
+                                          borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none', 
+                                          backgroundColor: getDepartmentColor(s.department),
+                                          cursor: 'pointer',
+                                          userSelect: 'none'
+                                        }}
+                                      >
+                                        {s.name}
+                                      </div>
+                                    ) : (
+                                      <div 
+                                        key={i} 
+                                        onClick={() => openPreviewEdit(idx, 'evening', -1, null, day.shortName, dayDateStr)}
+                                        title="לחץ להוספת תורן ערב"
+                                        style={{ 
+                                          padding: '0.4rem', 
+                                          borderBottom: i < maxRows - 1 ? '1px solid #eee' : 'none',
+                                          cursor: 'pointer'
+                                        }}
+                                      >
+                                        &nbsp;
+                                      </div>
+                                    );
                                   })}
                                 </td>
                               </tr>
@@ -2493,6 +2734,255 @@ const ManagerScreen = () => {
               >
                 <RotateCcw size={17} />
                 {isResetting ? 'מאפס כעת...' : 'בטוח! אפס את הטבלה עכשיו'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* מודאל עריכת שם תורן בשיבוץ המקדים (לפני שליחה לחברים) */}
+      {previewEditModal && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.82)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 99999,
+            padding: '1rem',
+            direction: 'rtl'
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setPreviewEditModal(null);
+          }}
+        >
+          <div 
+            className="glass-panel animate-fade-in"
+            style={{
+              maxWidth: '480px',
+              width: '100%',
+              backgroundColor: '#1e293b',
+              border: '2px solid rgba(99, 102, 241, 0.5)',
+              borderRadius: '16px',
+              padding: '1.75rem',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+              position: 'relative'
+            }}
+          >
+            {/* כותרת וכפתור סגירה */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.75rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--primary-color)' }}>
+                <PenLine size={22} />
+                {previewEditModal.slotIdx >= 0 ? 'עריכת תורן בשיבוץ' : 'הוספת תורן לשיבוץ'}
+              </h3>
+              <button 
+                type="button"
+                onClick={() => setPreviewEditModal(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '1.4rem', padding: '0.2rem' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* פרטי היום והמשמרת */}
+            <div style={{ backgroundColor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1.25rem', fontSize: '0.9rem' }}>
+              {previewEditModal.allowChooseDayAndShift ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>בחר יום:</label>
+                    <select 
+                      value={modalDayIdx}
+                      onChange={(e) => setModalDayIdx(Number(e.target.value))}
+                      className="input-field"
+                      style={{ width: '100%', padding: '0.45rem', backgroundColor: '#0f172a', color: 'white', borderRadius: '6px', fontSize: '0.88rem' }}
+                    >
+                      {algorithmResult?.schedule?.map((d, dIdx) => (
+                        <option key={dIdx} value={dIdx}>יום {d.shortName} ({formatDayDate(d.shortName, weekStartDate)})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>בחר משמרת:</label>
+                    <select 
+                      value={modalShiftTime}
+                      onChange={(e) => setModalShiftTime(e.target.value)}
+                      className="input-field"
+                      style={{ width: '100%', padding: '0.45rem', backgroundColor: '#0f172a', color: 'white', borderRadius: '6px', fontSize: '0.88rem' }}
+                    >
+                      <option value="morning">בוקר ☀️</option>
+                      <option value="evening">ערב 🌙</option>
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <span><strong>יום:</strong> {previewEditModal.dayShortName} {previewEditModal.dateStr && `(${previewEditModal.dateStr})`}</span>
+                  <span><strong>משמרת:</strong> {previewEditModal.shiftTime === 'morning' ? 'בוקר ☀️' : 'ערב 🌙'}</span>
+                  {previewEditModal.soldier && (
+                    <span><strong>שם נוכחי:</strong> <span style={{ color: 'var(--secondary-color)', fontWeight: 'bold' }}>{previewEditModal.soldier.name}</span></span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* כפתורי מעבר בין בחירה מרשימה לבין הקלדה חופשית */}
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+              <button 
+                type="button"
+                onClick={() => setModalMode('select')}
+                style={{
+                  flex: 1,
+                  padding: '0.5rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  backgroundColor: modalMode === 'select' ? 'var(--primary-color)' : 'rgba(255,255,255,0.06)',
+                  color: 'white',
+                  fontWeight: modalMode === 'select' ? 600 : 'normal'
+                }}
+              >
+                👥 בחירה מהפלוגה
+              </button>
+              <button 
+                type="button"
+                onClick={() => setModalMode('custom')}
+                style={{
+                  flex: 1,
+                  padding: '0.5rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  backgroundColor: modalMode === 'custom' ? 'var(--primary-color)' : 'rgba(255,255,255,0.06)',
+                  color: 'white',
+                  fontWeight: modalMode === 'custom' ? 600 : 'normal'
+                }}
+              >
+                ✍️ הזנת שם חופשי
+              </button>
+            </div>
+
+            {/* בחירה מרשימת החיילים */}
+            {modalMode === 'select' && (
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
+                  בחר חייל מהפלוגה להחלפה מהירה:
+                </label>
+                <select 
+                  value={modalSoldierKey}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setModalSoldierKey(val);
+                    if (val) {
+                      const [sName, sDept] = val.split('__');
+                      setModalCustomName(sName || '');
+                      setModalCustomDept(sDept || 'לוגיסטיקה');
+                    }
+                  }}
+                  className="input-field"
+                  style={{ width: '100%', padding: '0.6rem', backgroundColor: '#0f172a', color: 'white', borderRadius: '6px', fontSize: '0.95rem' }}
+                >
+                  <option value="">-- בחר חייל מהרשימה --</option>
+                  {departmentsData.map(dep => (
+                    <optgroup key={dep.departmentName} label={`מחלקת ${dep.departmentName}`}>
+                      {(dep.soldiers || []).map((s, sIdx) => (
+                        <option key={`${s.name}__${dep.departmentName}__${sIdx}`} value={`${s.name}__${dep.departmentName}`}>
+                          {s.name} ({dep.departmentName})
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* שדה שם לתצוגה */}
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
+                שם התורן שיוצג בטבלה:
+              </label>
+              <input 
+                type="text"
+                value={modalCustomName}
+                onChange={(e) => setModalCustomName(e.target.value)}
+                placeholder="הקלד שם תורן..."
+                className="input-field"
+                style={{ width: '100%', padding: '0.6rem', backgroundColor: '#0f172a', color: 'white', borderRadius: '6px', fontSize: '0.95rem' }}
+              />
+            </div>
+
+            {/* בחירת מחלקה (צבע המשבצת בטבלה) */}
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
+                צבע המשבצת לפי מחלקה:
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.4rem' }}>
+                {[
+                  { name: 'לוגיסטיקה', color: '#fef08a' },
+                  { name: 'תקשוב', color: '#bae6fd' },
+                  { name: 'טנ"א', color: '#bbf7d0' },
+                  { name: 'משא"ן', color: '#fbcfe8' },
+                  { name: 'אג"ם', color: '#e2e8f0' },
+                  { name: 'אחר', color: '#f3f4f6' }
+                ].map(d => (
+                  <button
+                    key={d.name}
+                    type="button"
+                    onClick={() => setModalCustomDept(d.name)}
+                    style={{
+                      padding: '0.45rem 0.25rem',
+                      borderRadius: '6px',
+                      border: modalCustomDept === d.name ? '2px solid var(--primary-color)' : '1px solid rgba(255,255,255,0.1)',
+                      backgroundColor: d.color,
+                      color: '#000',
+                      fontSize: '0.82rem',
+                      fontWeight: modalCustomDept === d.name ? 'bold' : 'normal',
+                      cursor: 'pointer',
+                      textAlign: 'center',
+                      boxShadow: modalCustomDept === d.name ? '0 0 8px rgba(99, 102, 241, 0.6)' : 'none'
+                    }}
+                  >
+                    {d.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* כפתורי פעולה */}
+            <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', flexWrap: 'wrap', alignItems: 'center' }}>
+              {previewEditModal.slotIdx >= 0 && !previewEditModal.allowChooseDayAndShift && (
+                <button 
+                  type="button"
+                  onClick={handleRemovePreviewSoldier}
+                  className="btn"
+                  style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.4)', padding: '0.6rem 1rem', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.35rem', marginLeft: 'auto' }}
+                  title="מחק חייל זה ממשמרת זו"
+                >
+                  <Trash2 size={16} /> מחק תורן
+                </button>
+              )}
+              <button 
+                type="button"
+                onClick={() => setPreviewEditModal(null)}
+                className="btn btn-secondary"
+                style={{ padding: '0.6rem 1.2rem', fontSize: '0.9rem' }}
+              >
+                ביטול
+              </button>
+              <button 
+                type="button"
+                onClick={handleSavePreviewEdit}
+                disabled={!modalCustomName.trim()}
+                className="btn"
+                style={{ backgroundColor: 'var(--primary-color)', color: 'white', padding: '0.6rem 1.5rem', fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <CheckCircle2 size={16} /> שמור שינוי
               </button>
             </div>
           </div>
