@@ -65,6 +65,17 @@ const ManagerScreen = () => {
   const [signSuccessMessage, setSignSuccessMessage] = useState(false);
   const [isSigning, setIsSigning] = useState(false);
 
+  const [weekTitleInput, setWeekTitleInput] = useState('');
+  const [isSavingWeekTitle, setIsSavingWeekTitle] = useState(false);
+  const [weekTitleSavedMsg, setWeekTitleSavedMsg] = useState(false);
+  const [copiedLinkMsg, setCopiedLinkMsg] = useState(false);
+
+  useEffect(() => {
+    if (justiceData && justiceData.weekTitle !== undefined) {
+      setWeekTitleInput(justiceData.weekTitle || '');
+    }
+  }, [justiceData?.weekTitle]);
+
   const [weekStartDate, setWeekStartDate] = useState(() => {
     return localStorage.getItem('toraniot_weekStartDate') || getDefaultSunday();
   });
@@ -279,19 +290,19 @@ const ManagerScreen = () => {
     }, 4000);
   };
 
-  // העברת השבצ״ק מהאלגוריתם (שלב 4) לטבלה השבועית לעריכה (שלב 5) - ללא חתימה עדיין
+  // העברת השבצ״ק מהאלגוריתם (שלב 4) לטבלה השבועית לעריכה (שלב 5)
   const handleTransferToStep5 = async () => {
     if (!algorithmResult) return;
 
     if (justiceData && justiceData.schedule && justiceData.schedule.length > 0) {
       if (!justiceData.isSigned) {
         const proceed = window.confirm(
-          "⚠️ שים לב: בלוח השבצ״ק הנוכחי (שלב 5) יש משמרות שטרם נחתמו!\n\nאם תעביר שבצ״ק חדש כעת, המשמרות הללו יימחקו מהלוח ולא ייצברו לטבלת הצדק.\n\nמומלץ ללחוץ 'ביטול', לחתום קודם על השבצ״ק הנוכחי ('✍️ חתום ואשר שבצ״ק סופי'), ורק אז להעביר את השבצ״ק החדש.\n\nהאם לדרוס בכל זאת?"
+          "⚠️ שים לב: בלוח השבצ״ק הנוכחי (שלב 5) יש משמרות שטרם הועברו לטבלת הצדק!\n\nאם תעביר שבצ״ק חדש כעת, המשמרות הללו יימחקו ולא ייצברו לטבלת הצדק.\n\nהאם להמשיך ולהעביר בכל זאת?"
         );
         if (!proceed) return;
       } else {
         const proceed = window.confirm(
-          "השבצ״ק הנוכחי חתום וכל משמרותיו שמורות בבטחה בטבלת הצדק החודשית.\n\nהעברת השבצ״ק החדש תציג בלוח את השבוע החדש. להמשיך?"
+          "השבצ״ק הנוכחי כבר הועבר לטבלת הצדק.\n\nהעברת השבצ״ק החדש תציג בלוח שלב 5 את השבוע החדש לעריכה. להמשיך?"
         );
         if (!proceed) return;
       }
@@ -326,9 +337,16 @@ const ManagerScreen = () => {
     setTimeout(() => {
       setTransferredSuccess(false);
     }, 4000);
+
+    setTimeout(() => {
+      const step5El = document.getElementById('step-5-section');
+      if (step5El) {
+        step5El.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 100);
   };
 
-  // חתימת מנהל בסוף השבוע - נעילת השבצ״ק בפועל וצבירת המשמרות לטבלת הצדק
+  // העברה לטבלת הצדק בסיום העריכה (סגירת שבצ״ק וצבירת משמרות בהיסטוריה)
   const handleSignSchedule = async () => {
     if (!justiceData || !justiceData.schedule) return;
     setIsSigning(true);
@@ -338,7 +356,7 @@ const ManagerScreen = () => {
       const historySnap = await getDoc(historyRef);
       const globalStats = historySnap.exists() ? { ...historySnap.data() } : {};
 
-      // אם כבר נצברו נתונים בעבר לשבוע זה (למשל חתימה מחדש), מנקים אותם תחילה
+      // אם כבר נצברו נתונים בעבר לשבוע זה, מנקים אותם תחילה
       if (justiceData.weekContributions) {
         Object.entries(justiceData.weekContributions).forEach(([key, contribution]) => {
           if (globalStats[key]) {
@@ -353,7 +371,9 @@ const ManagerScreen = () => {
       const newWeekContributions = {};
       const addToContributions = (s, isWeekend, weight) => {
         if (!s || !s.name) return;
-        const key = `${s.name}_${s.department}`;
+        const rawKey = `${s.name}_${s.department}`;
+        const trimmedKey = `${s.name.trim()}_${(s.department || '').trim()}`;
+        const key = globalStats[rawKey] ? rawKey : (globalStats[trimmedKey] ? trimmedKey : rawKey);
         if (!newWeekContributions[key]) {
           newWeekContributions[key] = { total: 0, weekend: 0, midweek: 0 };
         }
@@ -381,14 +401,11 @@ const ManagerScreen = () => {
 
       await setDoc(historyRef, globalStats);
 
-      const currentSigner = signerName.trim() || 'מנהל תורנויות';
-      localStorage.setItem('toraniot_signerName', currentSigner);
-
       await setDoc(doc(db, 'justiceTable', 'current'), {
         ...justiceData,
         isSigned: true,
         signedAt: new Date().toISOString(),
-        signedBy: currentSigner,
+        signedBy: 'מנהל תורנויות',
         historyApplied: true,
         weekContributions: newWeekContributions
       });
@@ -396,16 +413,16 @@ const ManagerScreen = () => {
       setSignSuccessMessage(true);
       setTimeout(() => setSignSuccessMessage(false), 5000);
     } catch (err) {
-      console.error("Error signing schedule:", err);
-      alert("אירעה שגיאה בחתימה: " + err.message);
+      console.error("Error transferring to justice table:", err);
+      alert("אירעה שגיאה בהעברה לטבלת הצדק: " + err.message);
     } finally {
       setIsSigning(false);
     }
   };
 
-  // פתיחת שבצ״ק חתום לעריכה מחודשת במקרה של בלת״ם מאוחר
+  // פתיחת שבצ״ק חתום לעריכה מחודשת
   const handleUnlockForEdit = async () => {
-    if (!window.confirm("פתיחת השבצ״ק לעריכה תבטל זמנית את צבירת המשמרות של השבוע עד לחתימתך המחודשת בסיום העריכה. להמשיך?")) {
+    if (!window.confirm("פתיחת השבצ״ק לעריכה תבטל זמנית את צבירת המשמרות של השבוע עד להעברה מחודשת לטבלת הצדק בסיום העריכה. להמשיך?")) {
       return;
     }
 
@@ -433,7 +450,63 @@ const ManagerScreen = () => {
       });
     } catch (err) {
       console.error("Error unlocking schedule:", err);
-      alert("שגיאה בפתיחת השבצ״ק: " + err.message);
+      alert("שגיאה בפתיחת השבצ״ק לעריכה: " + err.message);
+    }
+  };
+
+  // איפוס וניקוי הטבלה השבועית בלבד (הכנה לשבוע חדש) - ללא פגיעה בטבלת הצדק
+  const handleClearCurrentScheduleOnly = async () => {
+    if (!justiceData) return;
+
+    if (!justiceData.isSigned) {
+      const confirmUnsigned = window.confirm(
+        "⚠️ שים לב: השבצ״ק השבועי הנוכחי טרם נחתם!\n\nאם תאפס את הטבלה כעת, המשמרות שבוצעו השבוע לא יישמרו בטבלת הצדק.\n\nמומלץ לחתום קודם ('✍️ חתום ואשר – עדכן לטבלת הצדק').\n\nהאם לאפס ולנקות את הטבלה בכל זאת?"
+      );
+      if (!confirmUnsigned) return;
+    } else {
+      const confirmSigned = window.confirm(
+        "השבצ״ק הנוכחי כבר חתום וכל משמרותיו שמורות בבטחה בטבלת הצדק.\n\nפעולה זו תנקה את לוח שלב 5 בלבד ותכין אותו לשבוע חדש (ללא שום פגיעה בטבלת הצדק).\n\nהאם לנקות את הטבלה?"
+      );
+      if (!confirmSigned) return;
+    }
+
+    try {
+      await setDoc(doc(db, 'justiceTable', 'current'), {
+        schedule: null,
+        startDate: null,
+        timestamp: new Date().toISOString(),
+        isSigned: false,
+        signedAt: null,
+        signedBy: null,
+        weekContributions: null,
+        historyApplied: false
+      });
+      setJusticeData(null);
+    } catch (err) {
+      console.error("Error clearing current schedule:", err);
+      alert("שגיאה בניקוי הטבלה: " + err.message);
+    }
+  };
+
+  // עדכון כינוי / מספר השבוע שיוצג בקישור של החיילים
+  const handleSaveWeekTitle = async () => {
+    if (!justiceData) {
+      alert("יש להעלות קודם שבצ״ק לשלב 5 כדי לקבוע לו כינוי/שבוע");
+      return;
+    }
+    setIsSavingWeekTitle(true);
+    try {
+      await setDoc(doc(db, 'justiceTable', 'current'), {
+        ...justiceData,
+        weekTitle: weekTitleInput.trim()
+      });
+      setWeekTitleSavedMsg(true);
+      setTimeout(() => setWeekTitleSavedMsg(false), 3000);
+    } catch (err) {
+      console.error("Error saving week title:", err);
+      alert("שגיאה בעדכון שם השבוע: " + err.message);
+    } finally {
+      setIsSavingWeekTitle(false);
     }
   };
 
@@ -443,45 +516,6 @@ const ManagerScreen = () => {
       return;
     }
     const [newName, newDep] = newPersonStr.split('_');
-    const isWeekend = justiceData.schedule[dayIdx].isWeekend || justiceData.schedule[dayIdx].shortName === "ה'";
-    const weight = justiceData.schedule[dayIdx].shortName === "ש'" ? 0.5 : 1;
-
-    let updatedWeekContributions = justiceData.weekContributions ? { ...justiceData.weekContributions } : null;
-
-    // רק אם השבצ״ק כבר נחתם ונסגר בעבר, נעדכן את היסטוריית המשמרות במקביל
-    if (justiceData.isSigned) {
-      const historyRef = doc(db, 'history', 'stats');
-      const historySnap = await getDoc(historyRef);
-      const globalStats = historySnap.exists() ? historySnap.data() : {};
-      
-      const oldKey = `${oldPerson.name}_${oldPerson.department}`;
-      const newKey = `${newName}_${newDep}`;
-      
-      if (globalStats[oldKey]) {
-          globalStats[oldKey].total = Math.max(0, globalStats[oldKey].total - weight);
-          if (isWeekend) globalStats[oldKey].weekend = Math.max(0, globalStats[oldKey].weekend - weight);
-          else globalStats[oldKey].midweek = Math.max(0, globalStats[oldKey].midweek - weight);
-      }
-      
-      if (!globalStats[newKey]) globalStats[newKey] = { total: 0, weekend: 0, midweek: 0 };
-      globalStats[newKey].total += weight;
-      if (isWeekend) globalStats[newKey].weekend += weight;
-      else globalStats[newKey].midweek += weight;
-
-      if (updatedWeekContributions) {
-        if (updatedWeekContributions[oldKey]) {
-          updatedWeekContributions[oldKey].total = Math.max(0, updatedWeekContributions[oldKey].total - weight);
-          if (isWeekend) updatedWeekContributions[oldKey].weekend = Math.max(0, updatedWeekContributions[oldKey].weekend - weight);
-          else updatedWeekContributions[oldKey].midweek = Math.max(0, updatedWeekContributions[oldKey].midweek - weight);
-        }
-        if (!updatedWeekContributions[newKey]) updatedWeekContributions[newKey] = { total: 0, weekend: 0, midweek: 0 };
-        updatedWeekContributions[newKey].total += weight;
-        if (isWeekend) updatedWeekContributions[newKey].weekend += weight;
-        else updatedWeekContributions[newKey].midweek += weight;
-      }
-
-      await setDoc(historyRef, globalStats);
-    }
 
     const oldOrigName = oldPerson.originalName !== undefined ? oldPerson.originalName : oldPerson.name;
     const oldOrigDep = oldPerson.originalDepartment !== undefined ? oldPerson.originalDepartment : oldPerson.department;
@@ -499,8 +533,7 @@ const ManagerScreen = () => {
 
     await setDoc(doc(db, 'justiceTable', 'current'), {
         ...justiceData,
-        schedule: newSchedule,
-        weekContributions: updatedWeekContributions
+        schedule: newSchedule
     });
     
     setEditingShift(null);
@@ -513,31 +546,6 @@ const ManagerScreen = () => {
       return;
     }
     const [newName, newDep] = newPersonStr.split('_');
-    const isWeekend = justiceData.schedule[dayIdx].isWeekend || justiceData.schedule[dayIdx].shortName === "ה'";
-    const weight = justiceData.schedule[dayIdx].shortName === "ש'" ? 0.5 : 1;
-
-    let updatedWeekContributions = justiceData.weekContributions ? { ...justiceData.weekContributions } : null;
-
-    if (justiceData.isSigned) {
-      const historyRef = doc(db, 'history', 'stats');
-      const historySnap = await getDoc(historyRef);
-      const globalStats = historySnap.exists() ? historySnap.data() : {};
-      
-      const newKey = `${newName}_${newDep}`;
-      if (!globalStats[newKey]) globalStats[newKey] = { total: 0, weekend: 0, midweek: 0 };
-      globalStats[newKey].total += weight;
-      if (isWeekend) globalStats[newKey].weekend += weight;
-      else globalStats[newKey].midweek += weight;
-
-      if (updatedWeekContributions) {
-        if (!updatedWeekContributions[newKey]) updatedWeekContributions[newKey] = { total: 0, weekend: 0, midweek: 0 };
-        updatedWeekContributions[newKey].total += weight;
-        if (isWeekend) updatedWeekContributions[newKey].weekend += weight;
-        else updatedWeekContributions[newKey].midweek += weight;
-      }
-
-      await setDoc(historyRef, globalStats);
-    }
 
     const newSchedule = [...justiceData.schedule];
     if (!newSchedule[dayIdx][shiftTime]) {
@@ -555,8 +563,7 @@ const ManagerScreen = () => {
 
     await setDoc(doc(db, 'justiceTable', 'current'), {
       ...justiceData,
-      schedule: newSchedule,
-      weekContributions: updatedWeekContributions
+      schedule: newSchedule
     });
 
     setAddingShift(null);
@@ -569,39 +576,12 @@ const ManagerScreen = () => {
       return;
     }
 
-    const isWeekend = justiceData.schedule[dayIdx].isWeekend || justiceData.schedule[dayIdx].shortName === "ה'";
-    const weight = justiceData.schedule[dayIdx].shortName === "ש'" ? 0.5 : 1;
-
-    let updatedWeekContributions = justiceData.weekContributions ? { ...justiceData.weekContributions } : null;
-
-    if (justiceData.isSigned) {
-      const historyRef = doc(db, 'history', 'stats');
-      const historySnap = await getDoc(historyRef);
-      const globalStats = historySnap.exists() ? historySnap.data() : {};
-      
-      const oldKey = `${oldPerson.name}_${oldPerson.department}`;
-      if (globalStats[oldKey]) {
-        globalStats[oldKey].total = Math.max(0, globalStats[oldKey].total - weight);
-        if (isWeekend) globalStats[oldKey].weekend = Math.max(0, globalStats[oldKey].weekend - weight);
-        else globalStats[oldKey].midweek = Math.max(0, globalStats[oldKey].midweek - weight);
-      }
-
-      if (updatedWeekContributions && updatedWeekContributions[oldKey]) {
-        updatedWeekContributions[oldKey].total = Math.max(0, updatedWeekContributions[oldKey].total - weight);
-        if (isWeekend) updatedWeekContributions[oldKey].weekend = Math.max(0, updatedWeekContributions[oldKey].weekend - weight);
-        else updatedWeekContributions[oldKey].midweek = Math.max(0, updatedWeekContributions[oldKey].midweek - weight);
-      }
-
-      await setDoc(historyRef, globalStats);
-    }
-
     const newSchedule = [...justiceData.schedule];
     newSchedule[dayIdx][shiftTime].splice(idx, 1);
 
     await setDoc(doc(db, 'justiceTable', 'current'), {
       ...justiceData,
-      schedule: newSchedule,
-      weekContributions: updatedWeekContributions
+      schedule: newSchedule
     });
 
     setEditingShift(null);
@@ -1338,9 +1318,42 @@ const ManagerScreen = () => {
 
                 {algorithmResult && (
                   <div style={{ backgroundColor: 'rgba(16,185,129,0.05)', border: '1px solid var(--secondary-color)', padding: '1.5rem', borderRadius: '8px', marginBottom: '1.5rem', textAlign: 'center' }}>
-                    <h5 style={{ color: 'var(--secondary-color)', fontSize: '1.5rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem' }}>
+                    <h5 style={{ color: 'var(--secondary-color)', fontSize: '1.5rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem' }}>
                       <CheckCircle2 size={28} /> דוח שיבוץ תורנויות הושלם!
                     </h5>
+
+                    {/* כפתור העברה ישיר לשלב 5 */}
+                    <div style={{ marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.4rem' }}>
+                      <button 
+                        type="button"
+                        onClick={handleTransferToStep5} 
+                        className="btn" 
+                        style={{ 
+                          padding: '0.85rem 2.2rem', 
+                          backgroundColor: 'var(--primary-color)', 
+                          color: 'white', 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: '0.65rem', 
+                          fontSize: '1.15rem', 
+                          fontWeight: 700,
+                          boxShadow: '0 4px 16px rgba(99, 102, 241, 0.45)',
+                          borderRadius: '8px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <ArrowDown size={22} />
+                        העבר שבצ״ק לטבלה בשלב 5
+                      </button>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                        בלחיצה על הכפתור, השבצ״ק יועבר ישירות לטבלה בשלב 5 להמשך ניהול ועריכה
+                      </span>
+                      {transferredSuccess && (
+                        <div className="animate-fade-in" style={{ color: 'var(--secondary-color)', fontWeight: 600, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.25rem' }}>
+                          <CheckCircle2 size={18} /> השבצ״ק הועבר בהצלחה לשלב 5! מעביר אותך לטבלה...
+                        </div>
+                      )}
+                    </div>
                     
                     {/* תצוגת PDF מקדימה (טבלה) */}
                     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
@@ -1759,11 +1772,16 @@ const ManagerScreen = () => {
         {/* חץ למטה */}
         <ArrowDown size={32} color={justiceData ? "var(--primary-color)" : "var(--text-secondary)"} style={{ opacity: justiceData ? 1 : 0.5 }} />
 
-        {/* שלב 5: טבלת השבצ״ק, בלת"מים וחתימת מנהל בסוף השבוע */}
-        <div className="glass-panel" style={{ width: '100%', borderColor: justiceData ? 'var(--primary-color)' : 'var(--border-color)', position: 'relative' }}>
+        {/* שלב 5: טבלת השבצ״ק, בלת"מים והעברה לטבלת צדק בסיום העריכה */}
+        <div id="step-5-section" className="glass-panel" style={{ width: '100%', borderColor: justiceData ? 'var(--primary-color)' : 'var(--border-color)', position: 'relative' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <h4 style={{ fontSize: '1.2rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <h4 style={{ fontSize: '1.2rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                <ClipboardCheck color="var(--primary-color)" /> שלב 5: ניהול שבצ״ק שבועי ובלת״מים
+               {justiceData?.weekTitle && (
+                 <span style={{ fontSize: '0.9rem', padding: '0.15rem 0.65rem', borderRadius: '14px', backgroundColor: 'rgba(99, 102, 241, 0.25)', color: '#a5b4fc', border: '1px solid rgba(99, 102, 241, 0.5)', fontWeight: 'bold' }}>
+                   {justiceData.weekTitle}
+                 </span>
+               )}
                {(justiceData?.startDate || weekStartDate) && (
                  <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: 'normal' }}>
                    (שבוע {getWeekRangeStr(justiceData?.startDate || weekStartDate)})
@@ -1772,21 +1790,98 @@ const ManagerScreen = () => {
             </h4>
             {justiceData?.isSigned ? (
               <span style={{ fontSize: '0.85rem', padding: '0.3rem 0.8rem', borderRadius: '20px', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: 'var(--secondary-color)', border: '1px solid rgba(16, 185, 129, 0.3)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontWeight: 600 }}>
-                <CheckCircle2 size={15} /> שבוע חתום ומאושר
+                <CheckCircle2 size={15} /> הועבר לטבלת הצדק
               </span>
             ) : justiceData ? (
               <span style={{ fontSize: '0.85rem', padding: '0.3rem 0.8rem', borderRadius: '20px', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#F59E0B', border: '1px solid rgba(245, 158, 11, 0.3)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontWeight: 500 }}>
-                טיוטת שבצ״ק פעילה (ממתין לסוף השבוע)
+                טיוטת שבצ״ק בעריכה
               </span>
             ) : null}
           </div>
           
           {justiceData ? (
             <div className="animate-fade-in" style={{ textAlign: 'center' }}>
+              {/* סרגל הגדרת שבוע לחיילים ושיתוף קישור ייעודי */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                backgroundColor: 'rgba(99, 102, 241, 0.08)',
+                border: '1px solid rgba(99, 102, 241, 0.25)',
+                borderRadius: '8px',
+                padding: '0.75rem 1rem',
+                marginBottom: '1rem',
+                flexWrap: 'wrap',
+                gap: '0.75rem',
+                textAlign: 'right'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--primary-color)' }}>
+                    🏷️ הגדרת שבוע לחיילים:
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="למשל: שבוע 3"
+                    value={weekTitleInput}
+                    onChange={(e) => setWeekTitleInput(e.target.value)}
+                    style={{
+                      padding: '0.35rem 0.75rem',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      backgroundColor: 'rgba(0,0,0,0.3)',
+                      color: 'white',
+                      fontSize: '0.9rem',
+                      width: '140px'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveWeekTitle}
+                    disabled={isSavingWeekTitle}
+                    className="btn"
+                    style={{ padding: '0.35rem 0.85rem', fontSize: '0.85rem' }}
+                  >
+                    {isSavingWeekTitle ? 'שומר...' : 'עדכן שבוע לחיילים'}
+                  </button>
+                  {weekTitleSavedMsg && (
+                    <span style={{ fontSize: '0.82rem', color: '#34d399', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>
+                      <CheckCircle2 size={14} /> עודכן!
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = `${window.location.origin}${window.location.pathname}#/schedule`;
+                      navigator.clipboard.writeText(url);
+                      setCopiedLinkMsg(true);
+                      setTimeout(() => setCopiedLinkMsg(false), 3000);
+                    }}
+                    className="btn btn-secondary"
+                    style={{
+                      padding: '0.35rem 0.85rem',
+                      fontSize: '0.85rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      borderColor: 'rgba(56, 189, 248, 0.4)',
+                      color: '#38bdf8',
+                      backgroundColor: 'rgba(14, 165, 233, 0.1)'
+                    }}
+                    title="העתק את הקישור הישיר שיישלח לחיילים"
+                  >
+                    <Share2 size={15} />
+                    {copiedLinkMsg ? '✓ הקישור הועתק!' : '🔗 העתק קישור לחיילים (טבלה בלבד)'}
+                  </button>
+                </div>
+              </div>
+
               <p style={{ color: 'var(--text-secondary)', marginBottom: '0.75rem', textAlign: 'right', fontSize: '0.95rem' }}>
                 כאן מנוהל השבצ״ק השבועי בפועל. לחץ על שם של חייל כדי לעדכן בלת״ם (החלפה או הסרה), או לחץ על <strong>+ הוסף תורן</strong> להגדלת כמות התורנים ביום מסוים.
                 <br />
-                <strong>בסוף השבוע:</strong> וודא מי באמת עלה למשמרות, וחתום על השבצ״ק בחלק התחתון לסגירת השבוע ועדכון היסטוריית הצדק.
+                <strong>בסיום העריכה:</strong> לחץ על 'העבר לטבלת צדק בסיום העריכה' בתחתית הטבלה לעדכון וצבירת המשמרות בטבלת הצדק.
               </p>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
@@ -2089,114 +2184,133 @@ const ManagerScreen = () => {
                 </table>
               </div>
 
-              {/* חתימת מנהל - מיד אחרי הטבלה שניתן לערוך */}
+              {/* חתימת מנהל, עדכון לטבלת צדק ואיפוס לוח שבועי */}
               <div style={{
                 marginTop: '1.75rem',
                 padding: '1.5rem',
                 borderRadius: '10px',
                 backgroundColor: justiceData.isSigned ? 'rgba(16, 185, 129, 0.07)' : 'rgba(255, 255, 255, 0.02)',
                 border: justiceData.isSigned ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid var(--border-color)',
-                textAlign: 'right',
+                textAlign: 'center',
                 transition: 'all 0.3s ease'
               }}>
                 {justiceData.isSigned ? (
-                  <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <div style={{ width: '44px', height: '44px', borderRadius: '50%', backgroundColor: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--secondary-color)', border: '2px solid rgba(16, 185, 129, 0.4)' }}>
-                          <CheckCircle2 size={26} />
-                        </div>
-                        <div>
-                          <h4 style={{ margin: 0, fontSize: '1.15rem', color: 'var(--secondary-color)' }}>
-                            השבצ״ק השבועי נחתם ואושר רשמית!
-                          </h4>
-                          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                            השבוע נסגר והמשמרות בפועל נצברו בהיסטוריית הצדק לקראת השבוע הבא
-                          </span>
-                        </div>
+                  <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', justifyContent: 'center' }}>
+                      <div style={{ width: '44px', height: '44px', borderRadius: '50%', backgroundColor: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--secondary-color)', border: '2px solid rgba(16, 185, 129, 0.4)' }}>
+                        <CheckCircle2 size={26} />
                       </div>
-
-                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                        <button 
-                          onClick={handleUnlockForEdit} 
-                          className="btn btn-secondary" 
-                          style={{ fontSize: '0.85rem', padding: '0.45rem 1rem', display: 'flex', alignItems: 'center', gap: '0.4rem', borderColor: 'rgba(255,255,255,0.2)' }}
-                          title="פתח מחדש לעריכה אם התרחש בלת״ם של הרגע האחרון"
-                        >
-                          <Unlock size={14} /> פתח לעריכה מחודשת
-                        </button>
-
-                        <button 
-                          type="button"
-                          onClick={() => setShowResetModal(true)} 
-                          className="btn btn-secondary" 
-                          style={{ fontSize: '0.85rem', padding: '0.45rem 1rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#f87171', borderColor: 'rgba(239,68,68,0.3)' }}
-                          title="איפוס טבלת הצדק וביטול צבירת המשמרות"
-                        >
-                          <RotateCcw size={14} /> איפוס צבירת צדק
-                        </button>
+                      <div style={{ textAlign: 'right' }}>
+                        <h4 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--secondary-color)' }}>
+                          השבצ״ק נחתם ואושר רשמית!
+                        </h4>
+                        <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                          כל המשמרות בפועל נצברו ועודכנו בטבלת הצדק לקראת השבועות הבאים
+                        </span>
                       </div>
                     </div>
 
-                    <div style={{ backgroundColor: 'rgba(0,0,0,0.25)', borderRadius: '8px', padding: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', border: '1px solid rgba(255,255,255,0.05)' }}>
-                      <div>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block' }}>נחתם על ידי</span>
-                        <strong style={{ fontSize: '1rem', color: 'var(--text-primary)' }}>{justiceData.signedBy || 'מנהל תורנויות'}</strong>
-                      </div>
-                      <div>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block' }}>מועד חתימה</span>
-                        <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary)' }}>
-                          {justiceData.signedAt ? new Date(justiceData.signedAt).toLocaleString('he-IL', { dateStyle: 'medium', timeStyle: 'short' }) : '-'}
-                        </strong>
-                      </div>
-                      <div>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block' }}>סטטוס צבירת צדק</span>
-                        <strong style={{ fontSize: '0.95rem', color: 'var(--secondary-color)' }}>נצבר בהיסטוריה ✅</strong>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                      <h5 style={{ margin: 0, fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#F59E0B' }}>
-                        <FileCheck size={20} /> חתימת מנהל וסגירת שבוע (בסוף השבוע)
-                      </h5>
-                      <span style={{ fontSize: '0.8rem', padding: '0.2rem 0.6rem', borderRadius: '12px', backgroundColor: 'rgba(245, 158, 11, 0.1)', color: '#F59E0B', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
-                        סגירת שבוע
-                      </span>
-                    </div>
-
-                    <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '1.25rem', lineHeight: '1.5' }}>
-                      במהלך השבוע השבצ״ק פתוח לעריכת בלת״מים בטבלה שלמעלה.<br />
-                      <strong>בסיום השבוע</strong>, לאחר שווידאת מי מהחיילים אכן עלה לכל משמרת, חתום כאן כדי לאשר רשמית את השבצ״ק ולצבור את המשמרות בטבלת הצדק לחישוב השבועות הבאים.
-                    </p>
-
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '8px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: '1', minWidth: '240px' }}>
-                        <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>שם המנהל החותם:</label>
-                        <input 
-                          type="text" 
-                          className="input-field" 
-                          style={{ margin: 0, flex: 1, padding: '0.5rem 0.75rem' }}
-                          value={signerName} 
-                          onChange={(e) => setSignerName(e.target.value)} 
-                          placeholder="למשל: סגן רועי / מנהל תורנויות"
-                        />
-                      </div>
+                    {/* כפתורי פעולה לאחר חתימה: עריכה מחודשת או איפוס לוח שבועי זה בלבד */}
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center' }}>
+                      <button 
+                        type="button"
+                        onClick={handleUnlockForEdit} 
+                        className="btn btn-secondary" 
+                        style={{ 
+                          fontSize: '0.95rem', 
+                          padding: '0.65rem 1.4rem', 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: '0.5rem', 
+                          borderColor: 'rgba(255,255,255,0.25)',
+                          backgroundColor: 'rgba(255,255,255,0.06)'
+                        }}
+                        title="פתח מחדש לעריכה אם התרחש בלת״ם"
+                      >
+                        <Unlock size={16} /> פתח לעריכה מחודשת
+                      </button>
 
                       <button 
+                        type="button"
+                        onClick={handleClearCurrentScheduleOnly} 
+                        className="btn btn-secondary" 
+                        style={{ 
+                          fontSize: '0.95rem', 
+                          padding: '0.65rem 1.4rem', 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: '0.5rem', 
+                          color: '#f87171',
+                          borderColor: 'rgba(239,68,68,0.3)',
+                          backgroundColor: 'rgba(239,68,68,0.08)'
+                        }}
+                        title="ניקוי לוח שבועי זה בלבד - אינו מוחק נתונים מטבלת הצדק!"
+                      >
+                        <RotateCcw size={16} /> איפוס טבלה זו (הכן לשבוע הבא)
+                      </button>
+                    </div>
+
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      💡 כפתור האיפוס כאן מנקה אך ורק את לוח התצוגה השבועי הנוכחי, ואינו פוגע בנתוני טבלת הצדק שנצברו.
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <h5 style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: 'var(--secondary-color)' }}>
+                        <FileCheck size={22} /> חתימת שבצ״ק ועדכון טבלת הצדק
+                      </h5>
+                      <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: 0 }}>
+                        סיימת לעדכן את השבצ״ק והבלת״מים? חתום ואשר כדי לעדכן סופית את כל המשמרות שבוצעו לתוך טבלת הצדק.
+                      </p>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center' }}>
+                      <button 
+                        type="button"
                         onClick={handleSignSchedule} 
                         disabled={isSigning}
                         className="btn" 
-                        style={{ padding: '0.7rem 1.8rem', backgroundColor: '#F59E0B', color: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.05rem', fontWeight: 600, boxShadow: '0 4px 12px rgba(245, 158, 11, 0.3)' }}
+                        style={{ 
+                          padding: '0.85rem 2.2rem', 
+                          backgroundColor: 'var(--secondary-color)', 
+                          color: 'white', 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: '0.65rem', 
+                          fontSize: '1.15rem', 
+                          fontWeight: 700, 
+                          boxShadow: '0 4px 15px rgba(16, 185, 129, 0.4)',
+                          borderRadius: '8px',
+                          cursor: isSigning ? 'not-allowed' : 'pointer'
+                        }}
                       >
-                        <FileCheck size={18} />
-                        {isSigning ? 'שומר חתימה...' : '✍️ חתום ואשר שבצ״ק סופי'}
+                        <FileCheck size={20} />
+                        {isSigning ? 'שומר ומעדכן לטבלת הצדק...' : '✍️ חתום ואשר – עדכן לטבלת הצדק'}
+                      </button>
+
+                      <button 
+                        type="button"
+                        onClick={handleClearCurrentScheduleOnly} 
+                        className="btn btn-secondary" 
+                        style={{ 
+                          fontSize: '0.95rem', 
+                          padding: '0.85rem 1.4rem', 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: '0.5rem', 
+                          color: '#f87171',
+                          borderColor: 'rgba(239,68,68,0.3)',
+                          backgroundColor: 'rgba(239,68,68,0.06)'
+                        }}
+                        title="ניקוי הטבלה השבועית הזו בלבד"
+                      >
+                        <RotateCcw size={16} /> איפוס טבלה זו בלבד
                       </button>
                     </div>
 
                     {signSuccessMessage && (
-                      <div className="animate-fade-in" style={{ marginTop: '0.75rem', color: 'var(--secondary-color)', fontWeight: 600, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <div className="animate-fade-in" style={{ color: 'var(--secondary-color)', fontWeight: 600, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         <CheckCircle2 size={18} /> השבצ״ק נחתם בהצלחה והמשמרות נצברו לטבלת הצדק!
                       </div>
                     )}

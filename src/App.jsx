@@ -6,6 +6,7 @@ import KitchenScreenComponent from './pages/KitchenScreen';
 
 import DepartmentsScreenComponent from './pages/DepartmentsScreen';
 import ManagerScreenComponent from './pages/ManagerScreen';
+import SoldierWeeklyScreen from './pages/SoldierWeeklyScreen';
 
 // מסך בחירת תפקיד (ללא סיסמאות בינתיים)
 const LoginScreen = () => {
@@ -111,6 +112,10 @@ function App() {
         <Route path="/kitchen" element={<KitchenScreen />} />
         <Route path="/departments" element={<DepartmentsScreen />} />
         <Route path="/manager" element={<ManagerScreen />} />
+        {/* קישור ייעודי לחיילים - גישה לטבלת השבצ״ק בלבד ללא סרגלי ניווט או גישה לשאר המערכת */}
+        <Route path="/schedule" element={<SoldierWeeklyScreen />} />
+        <Route path="/board" element={<SoldierWeeklyScreen />} />
+        <Route path="/soldiers" element={<SoldierWeeklyScreen />} />
       </Routes>
     </HashRouter>
   );

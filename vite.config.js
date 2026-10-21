@@ -6,6 +6,6 @@ export default defineConfig(({ command }) => ({
   base: command === 'build' ? '/toraniot-app/' : '/',
   plugins: [react()],
   server: {
-    port: 5185,
+    port: 5174,
   },
 }))
