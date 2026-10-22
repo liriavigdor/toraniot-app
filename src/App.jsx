@@ -8,7 +8,7 @@ import DepartmentsScreenComponent from './pages/DepartmentsScreen';
 import ManagerScreenComponent from './pages/ManagerScreen';
 import SoldierWeeklyScreen from './pages/SoldierWeeklyScreen';
 
-// מסך בחירת תפקיד (ללא סיסמאות בינתיים)
+// מסך בחירת תפקיד
 const LoginScreen = () => {
   const [showDepartments, setShowDepartments] = useState(false);
 
@@ -27,15 +27,10 @@ const LoginScreen = () => {
               </button>
             </Link>
             
-            <button className="btn" onClick={() => setShowDepartments(true)} style={{ width: '100%', padding: '1.2rem', fontSize: '1.2rem', backgroundColor: 'var(--secondary-color)' }}>
-              <Users size={24} style={{ marginLeft: '10px' }} />
-              כניסה כסמל (הזנת סד״כ)
-            </button>
-            
-            <Link to="/manager" style={{ textDecoration: 'none' }}>
-              <button className="btn btn-secondary" style={{ width: '100%', padding: '1.2rem', fontSize: '1.2rem', backgroundColor: 'rgba(255,255,255,0.05)' }}>
-                <ClipboardCheck size={24} style={{ marginLeft: '10px' }} />
-                כניסה כמנהל (שיבוץ)
+            <Link to="/departments" style={{ textDecoration: 'none' }}>
+              <button className="btn" style={{ width: '100%', padding: '1.2rem', fontSize: '1.2rem', backgroundColor: 'var(--secondary-color)' }}>
+                <Users size={24} style={{ marginLeft: '10px' }} />
+                כניסה כסמל (הזנת סד״כ)
               </button>
             </Link>
           </div>
@@ -62,9 +57,6 @@ const LoginScreen = () => {
 };
 
 const DashboardLayout = ({ children, title, icon: Icon }) => {
-  const location = useLocation();
-  const getNavClass = (path) => location.pathname === path ? "btn" : "btn btn-secondary";
-  
   return (
     <div className="app-container animate-fade-in">
       <header className="glass-panel" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', padding: '1rem 2rem' }}>
@@ -72,12 +64,6 @@ const DashboardLayout = ({ children, title, icon: Icon }) => {
           <Icon size={28} color="var(--primary-color)" />
           <h2>{title}</h2>
         </div>
-        <nav style={{ display: 'flex', gap: '1rem' }}>
-          <Link to="/kitchen" className={getNavClass('/kitchen')}><ChefHat size={18}/> מטבח</Link>
-          <Link to="/departments" className={getNavClass('/departments')}><Users size={18}/> מחלקות</Link>
-          <Link to="/manager" className={getNavClass('/manager')}><ClipboardCheck size={18}/> מנהל</Link>
-          <Link to="/" className="btn btn-secondary" style={{ borderColor: 'var(--danger-color)', color: 'var(--danger-color)' }}><LogOut size={18}/> יציאה</Link>
-        </nav>
       </header>
       <main>
         {children}
@@ -99,7 +85,7 @@ const DepartmentsScreen = () => (
 );
 
 const ManagerScreen = () => (
-  <DashboardLayout title="בקרה ושיבוץ תורנויות" icon={ClipboardCheck}>
+  <DashboardLayout title="פיקוד ובקרה - שיבוץ תורנויות" icon={ClipboardCheck}>
     <ManagerScreenComponent />
   </DashboardLayout>
 );
@@ -109,9 +95,19 @@ function App() {
     <HashRouter>
       <Routes>
         <Route path="/" element={<LoginScreen />} />
-        <Route path="/kitchen" element={<KitchenScreen />} />
+        
+        {/* קישור הסמלים - כולל manager שכבר הופץ אליהם וכולל departments */}
+        <Route path="/manager" element={<DepartmentsScreen />} />
         <Route path="/departments" element={<DepartmentsScreen />} />
-        <Route path="/manager" element={<ManagerScreen />} />
+        
+        {/* קישור מנהל / פיקוד ראשי חדש */}
+        <Route path="/command" element={<ManagerScreen />} />
+        <Route path="/hq" element={<ManagerScreen />} />
+        <Route path="/admin" element={<ManagerScreen />} />
+
+        {/* קישור מטבח */}
+        <Route path="/kitchen" element={<KitchenScreen />} />
+
         {/* קישור ייעודי לחיילים - גישה לטבלת השבצ״ק בלבד ללא סרגלי ניווט או גישה לשאר המערכת */}
         <Route path="/schedule" element={<SoldierWeeklyScreen />} />
         <Route path="/board" element={<SoldierWeeklyScreen />} />

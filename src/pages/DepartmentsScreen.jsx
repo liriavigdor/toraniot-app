@@ -8,10 +8,11 @@ import { useLocation } from 'react-router-dom';
 const EXPECTED_DEPARTMENTS = ['תקשוב', 'לוגיסטיקה', 'טנ"א', 'משא"ן'];
 
 const DepartmentsScreen = () => {
-  // קריאת שם המחלקה מה-URL
+  // קריאת שם המחלקה מה-URL אם הועבר, או בחירה ישירה במסך
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
-  const departmentName = searchParams.get('name') || 'לא זוהה משתמש';
+  const initialDepartment = searchParams.get('name') || '';
+  const [selectedDepartment, setSelectedDepartment] = useState(initialDepartment);
   
   const [soldiers, setSoldiers] = useState([{ name: '', isNewSoldier: false, closesWeekend: false, exceptionType: 'none', exceptionReason: '', shiftPreference: 'none', blockedDays: [], constraintReason: '', spreadPreference: 'none', shiftTypePreference: 'none', preferredBuddy: '' }]);
   const [loading, setLoading] = useState(false);
@@ -19,23 +20,30 @@ const DepartmentsScreen = () => {
 
   React.useEffect(() => {
     const fetchDep = async () => {
-      if (departmentName && departmentName !== 'לא זוהה משתמש') {
+      if (selectedDepartment) {
+        setLoading(true);
         try {
-          const docRef = doc(db, 'activeDepartments', departmentName);
+          const docRef = doc(db, 'activeDepartments', selectedDepartment);
           const docSnap = await getDoc(docRef);
           if (docSnap.exists()) {
             const data = docSnap.data();
             if (data.soldiers && data.soldiers.length > 0) {
               setSoldiers(data.soldiers);
+            } else {
+              setSoldiers([{ name: '', isNewSoldier: false, closesWeekend: false, exceptionType: 'none', exceptionReason: '', shiftPreference: 'none', blockedDays: [], constraintReason: '', spreadPreference: 'none', shiftTypePreference: 'none', preferredBuddy: '' }]);
             }
+          } else {
+            setSoldiers([{ name: '', isNewSoldier: false, closesWeekend: false, exceptionType: 'none', exceptionReason: '', shiftPreference: 'none', blockedDays: [], constraintReason: '', spreadPreference: 'none', shiftTypePreference: 'none', preferredBuddy: '' }]);
           }
         } catch (e) {
           console.error(e);
+        } finally {
+          setLoading(false);
         }
       }
     };
     fetchDep();
-  }, [departmentName]);
+  }, [selectedDepartment]);
 
   const handleAddSoldier = () => {
     setSoldiers([...soldiers, { name: '', isNewSoldier: false, closesWeekend: false, exceptionType: 'none', exceptionReason: '', shiftPreference: 'none', blockedDays: [], constraintReason: '', spreadPreference: 'none', shiftTypePreference: 'none', preferredBuddy: '' }]);
@@ -65,8 +73,8 @@ const DepartmentsScreen = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!departmentName || departmentName === 'לא זוהה משתמש') {
-      setMessage('שגיאה: לא זוהתה מחלקה. נסה להתחבר מחדש.');
+    if (!selectedDepartment) {
+      setMessage('שגיאה: לא נבחרה מחלקה. בחר מחלקה תחילה.');
       return;
     }
 
@@ -82,8 +90,8 @@ const DepartmentsScreen = () => {
     setMessage('');
 
     try {
-      await setDoc(doc(db, 'activeDepartments', departmentName), {
-        departmentName,
+      await setDoc(doc(db, 'activeDepartments', selectedDepartment), {
+        departmentName: selectedDepartment,
         soldiers: validSoldiers,
         updatedAt: serverTimestamp()
       });
@@ -97,12 +105,62 @@ const DepartmentsScreen = () => {
     }
   };
 
+  if (!selectedDepartment) {
+    return (
+      <div className="glass-panel animate-fade-in" style={{ maxWidth: '520px', margin: '2rem auto', textAlign: 'center', padding: '2.5rem' }}>
+        <div style={{ display: 'inline-flex', padding: '1rem', borderRadius: '50%', backgroundColor: 'rgba(59, 130, 246, 0.1)', marginBottom: '1.2rem' }}>
+          <Users size={44} color="var(--primary-color)" />
+        </div>
+        <h2 style={{ marginBottom: '0.75rem', fontSize: '1.8rem' }}>כניסת סמלים</h2>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', fontSize: '1.05rem', lineHeight: '1.5' }}>
+          בחר את המחלקה שלך כדי לעדכן את מצבת החיילים והאילוצים:
+        </p>
+        <div style={{ display: 'grid', gap: '1rem' }}>
+          {EXPECTED_DEPARTMENTS.map(dep => (
+            <button
+              key={dep}
+              onClick={() => setSelectedDepartment(dep)}
+              className="btn btn-secondary"
+              style={{
+                width: '100%',
+                padding: '1.1rem',
+                fontSize: '1.2rem',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: '0.75rem',
+                backgroundColor: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                cursor: 'pointer',
+                fontWeight: 600,
+                borderRadius: '10px'
+              }}
+            >
+              <Users size={20} color="var(--secondary-color)" />
+              סמל {dep}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="glass-panel animate-fade-in" style={{ maxWidth: '800px', margin: '0 auto' }}>
       <h3 style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '1.5rem' }}>
         <Users color="var(--primary-color)" /> ניהול מצבת כוח אדם
       </h3>
-      <h4 style={{ color: 'var(--secondary-color)', marginBottom: '1.5rem' }}>משתמש: סמל {departmentName}</h4>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <h4 style={{ color: 'var(--secondary-color)', margin: 0, fontSize: '1.2rem' }}>משתמש: סמל {selectedDepartment}</h4>
+        <button 
+          type="button" 
+          onClick={() => setSelectedDepartment('')} 
+          className="btn btn-secondary" 
+          style={{ padding: '0.35rem 0.8rem', fontSize: '0.85rem' }}
+        >
+          החלף מחלקה
+        </button>
+      </div>
       
       <form onSubmit={handleSubmit}>
 
