@@ -110,8 +110,11 @@ const ManagerScreen = () => {
 
     // 3. האזנה לטבלת הצדק
     const unsubJustice = onSnapshot(doc(db, 'justiceTable', 'current'), (docSnap) => {
-      if (docSnap.exists()) setJusticeData(docSnap.data());
-      else setJusticeData(null);
+      if (docSnap.exists() && docSnap.data().schedule && docSnap.data().schedule.length > 0) {
+        setJusticeData(docSnap.data());
+      } else {
+        setJusticeData(null);
+      }
     });
     
     // 4. האזנה להיסטוריית משמרות
@@ -1792,14 +1795,14 @@ const ManagerScreen = () => {
               <span style={{ fontSize: '0.85rem', padding: '0.3rem 0.8rem', borderRadius: '20px', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: 'var(--secondary-color)', border: '1px solid rgba(16, 185, 129, 0.3)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontWeight: 600 }}>
                 <CheckCircle2 size={15} /> הועבר לטבלת הצדק
               </span>
-            ) : justiceData ? (
+            ) : (justiceData && justiceData.schedule && justiceData.schedule.length > 0) ? (
               <span style={{ fontSize: '0.85rem', padding: '0.3rem 0.8rem', borderRadius: '20px', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#F59E0B', border: '1px solid rgba(245, 158, 11, 0.3)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontWeight: 500 }}>
                 טיוטת שבצ״ק בעריכה
               </span>
             ) : null}
           </div>
           
-          {justiceData ? (
+          {(justiceData && justiceData.schedule && justiceData.schedule.length > 0) ? (
             <div className="animate-fade-in" style={{ textAlign: 'center' }}>
               {/* סרגל הגדרת שבוע לחיילים ושיתוף קישור ייעודי */}
               <div style={{
