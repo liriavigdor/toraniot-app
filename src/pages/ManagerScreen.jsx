@@ -357,15 +357,38 @@ const ManagerScreen = () => {
     try {
       const historyRef = doc(db, 'history', 'stats');
       const historySnap = await getDoc(historyRef);
-      const globalStats = historySnap.exists() ? { ...historySnap.data() } : {};
+      const rawGlobalStats = historySnap.exists() ? { ...historySnap.data() } : {};
+      
+      // נרמול ואיחוד כל המפתחות הקיימים בהיסטוריה למניעת כפילויות עקב רווחים
+      const globalStats = {};
+      Object.entries(rawGlobalStats).forEach(([rawK, val]) => {
+        const parts = rawK.split('_');
+        const normK = `${(parts[0] || '').trim()}_${(parts.slice(1).join('_') || '').trim()}`;
+        if (!normK) return;
+        if (!globalStats[normK]) {
+          globalStats[normK] = {
+            total: Number(val.total || 0),
+            midweek: Number(val.midweek || 0),
+            weekend: Number(val.weekend || 0),
+            kesherDays: Number(val.kesherDays || 0)
+          };
+        } else {
+          globalStats[normK].total += Number(val.total || 0);
+          globalStats[normK].midweek += Number(val.midweek || 0);
+          globalStats[normK].weekend += Number(val.weekend || 0);
+          globalStats[normK].kesherDays += Number(val.kesherDays || 0);
+        }
+      });
 
       // אם כבר נצברו נתונים בעבר לשבוע זה, מנקים אותם תחילה
       if (justiceData.weekContributions) {
         Object.entries(justiceData.weekContributions).forEach(([key, contribution]) => {
-          if (globalStats[key]) {
-            globalStats[key].total = Math.max(0, (globalStats[key].total || 0) - (contribution.total || 0));
-            globalStats[key].midweek = Math.max(0, (globalStats[key].midweek || 0) - (contribution.midweek || 0));
-            globalStats[key].weekend = Math.max(0, (globalStats[key].weekend || 0) - (contribution.weekend || 0));
+          const parts = key.split('_');
+          const normKey = `${(parts[0] || '').trim()}_${(parts.slice(1).join('_') || '').trim()}`;
+          if (globalStats[normKey]) {
+            globalStats[normKey].total = Math.max(0, (globalStats[normKey].total || 0) - (contribution.total || 0));
+            globalStats[normKey].midweek = Math.max(0, (globalStats[normKey].midweek || 0) - (contribution.midweek || 0));
+            globalStats[normKey].weekend = Math.max(0, (globalStats[normKey].weekend || 0) - (contribution.weekend || 0));
           }
         });
       }
@@ -374,9 +397,9 @@ const ManagerScreen = () => {
       const newWeekContributions = {};
       const addToContributions = (s, isWeekend, weight) => {
         if (!s || !s.name) return;
-        const rawKey = `${s.name}_${s.department}`;
-        const trimmedKey = `${s.name.trim()}_${(s.department || '').trim()}`;
-        const key = globalStats[rawKey] ? rawKey : (globalStats[trimmedKey] ? trimmedKey : rawKey);
+        const normName = (s.name || '').trim();
+        const normDep = (s.department || '').trim();
+        const key = `${normName}_${normDep}`;
         if (!newWeekContributions[key]) {
           newWeekContributions[key] = { total: 0, weekend: 0, midweek: 0 };
         }
@@ -395,7 +418,7 @@ const ManagerScreen = () => {
       // הוספה להיסטוריה הגלובלית
       Object.entries(newWeekContributions).forEach(([key, contribution]) => {
         if (!globalStats[key]) {
-          globalStats[key] = { total: 0, weekend: 0, midweek: 0 };
+          globalStats[key] = { total: 0, weekend: 0, midweek: 0, kesherDays: 0 };
         }
         globalStats[key].total = (globalStats[key].total || 0) + contribution.total;
         globalStats[key].midweek = (globalStats[key].midweek || 0) + contribution.midweek;
@@ -434,12 +457,28 @@ const ManagerScreen = () => {
         const historyRef = doc(db, 'history', 'stats');
         const historySnap = await getDoc(historyRef);
         if (historySnap.exists()) {
-          const globalStats = { ...historySnap.data() };
+          const rawStats = historySnap.data();
+          const globalStats = {};
+          Object.entries(rawStats).forEach(([rawK, val]) => {
+            const parts = rawK.split('_');
+            const normK = `${(parts[0] || '').trim()}_${(parts.slice(1).join('_') || '').trim()}`;
+            if (!globalStats[normK]) {
+              globalStats[normK] = { ...val };
+            } else {
+              globalStats[normK].total = (globalStats[normK].total || 0) + (val.total || 0);
+              globalStats[normK].midweek = (globalStats[normK].midweek || 0) + (val.midweek || 0);
+              globalStats[normK].weekend = (globalStats[normK].weekend || 0) + (val.weekend || 0);
+              globalStats[normK].kesherDays = (globalStats[normK].kesherDays || 0) + (val.kesherDays || 0);
+            }
+          });
+
           Object.entries(justiceData.weekContributions).forEach(([key, contribution]) => {
-            if (globalStats[key]) {
-              globalStats[key].total = Math.max(0, (globalStats[key].total || 0) - (contribution.total || 0));
-              globalStats[key].midweek = Math.max(0, (globalStats[key].midweek || 0) - (contribution.midweek || 0));
-              globalStats[key].weekend = Math.max(0, (globalStats[key].weekend || 0) - (contribution.weekend || 0));
+            const parts = key.split('_');
+            const normKey = `${(parts[0] || '').trim()}_${(parts.slice(1).join('_') || '').trim()}`;
+            if (globalStats[normKey]) {
+              globalStats[normKey].total = Math.max(0, (globalStats[normKey].total || 0) - (contribution.total || 0));
+              globalStats[normKey].midweek = Math.max(0, (globalStats[normKey].midweek || 0) - (contribution.midweek || 0));
+              globalStats[normKey].weekend = Math.max(0, (globalStats[normKey].weekend || 0) - (contribution.weekend || 0));
             }
           });
           await setDoc(historyRef, globalStats);
@@ -592,16 +631,43 @@ const ManagerScreen = () => {
 
   // נתוני אתר קשר וצדק משולבים - כל 1.5 ימים באתר קשר = 1 משמרת מטבח, יום עודף = 0.5 מטבח
   const combinedHistory = React.useMemo(() => {
-    const combined = { ...historyData };
+    const combined = {};
+    
+    // נרמול ואיחוד מפתחות מההיסטוריה (מניעת פיצול עקב רווחים או תווים עודפים)
+    Object.entries(historyData || {}).forEach(([rawKey, val]) => {
+      const parts = rawKey.split('_');
+      const normName = (parts[0] || '').trim();
+      const normDep = (parts.slice(1).join('_') || '').trim();
+      if (!normName) return;
+      const key = `${normName}_${normDep}`;
+
+      if (!combined[key]) {
+        combined[key] = {
+          total: Number(val.total || 0),
+          midweek: Number(val.midweek || 0),
+          weekend: Number(val.weekend || 0),
+          kesherDays: Number(val.kesherDays || 0)
+        };
+      } else {
+        combined[key].total += Number(val.total || 0);
+        combined[key].midweek += Number(val.midweek || 0);
+        combined[key].weekend += Number(val.weekend || 0);
+        combined[key].kesherDays += Number(val.kesherDays || 0);
+      }
+    });
+
     const kesherDaysMap = {};
     (kesherEntries || []).forEach(e => {
-      const key = `${e.soldierName}_${e.department}`;
+      const normName = (e.soldierName || '').trim();
+      const normDep = (e.department || '').trim();
+      if (!normName) return;
+      const key = `${normName}_${normDep}`;
       kesherDaysMap[key] = (kesherDaysMap[key] || 0) + Number(e.daysCount || 0);
     });
 
     // מעדכן חיילים שקיימים בהיסטוריה
     Object.keys(combined).forEach(key => {
-      const kDays = kesherDaysMap[key] || 0;
+      const kDays = kesherDaysMap[key] !== undefined ? kesherDaysMap[key] : (combined[key].kesherDays || 0);
       const kEquiv = kesherDaysToKitchenShifts(kDays);
       combined[key] = {
         ...combined[key],
@@ -633,37 +699,45 @@ const ManagerScreen = () => {
     return combined;
   }, [historyData, kesherEntries]);
 
-  // רשימת כל החיילים מכל המחלקות משוקללת עם נתוני הצדק (חיילים בעלי פטור מלא מוחרגים)
+  // רשימת כל החיילים מכל המחלקות משוקללת עם נתוני הצדק (חיילים בעלי פטור מלא מוחרגים, ללא כפילויות)
   const allSoldiersList = React.useMemo(() => {
     const list = [];
     const seenKeys = new Set();
     const fullExemptKeys = new Set();
 
     (departmentsData || []).forEach(dep => {
+      const depName = (dep.departmentName || '').trim();
       (dep.soldiers || []).forEach((s, idx) => {
         const id = `${dep.departmentName}_${idx}`;
         const isExemptRejected = managerOverrides[`${id}_exception`] === 'rejected';
         const activeExceptionType = isExemptRejected ? 'none' : (s.exceptionType || 'none');
-        if (activeExceptionType === 'full') {
-          fullExemptKeys.add(`${s.name}_${dep.departmentName}`);
+        const sName = (s.name || '').trim();
+        if (activeExceptionType === 'full' || s.exceptionType === 'full' || ['דמקה', 'דמקה אזנאו'].includes(sName)) {
+          fullExemptKeys.add(`${sName}_${depName}`);
         }
       });
     });
 
     (departmentsData || []).forEach(dep => {
+      const depName = (dep.departmentName || '').trim();
       (dep.soldiers || []).forEach(s => {
-        const key = `${s.name}_${dep.departmentName}`;
+        const sName = (s.name || '').trim();
+        if (!sName) return;
+        const key = `${sName}_${depName}`;
+        
+        // מניעת כפילות מוחלטת
+        if (seenKeys.has(key)) return;
         seenKeys.add(key);
 
-        // אם לחייל יש פטור מלא - מסירים אותו מטבלת הצדק
-        if (fullExemptKeys.has(key)) return;
+        // אם לחייל יש פטור מלא (כולל דמקה או פטורים נוספים) - מסירים אותו מטבלת הצדק
+        if (fullExemptKeys.has(key) || ['דמקה', 'דמקה אזנאו'].includes(sName) || s.exceptionType === 'full') return;
 
         const hist = combinedHistory[key] || { total: 0, midweek: 0, weekend: 0, kesherDays: 0, effectiveTotal: 0 };
         const kDays = hist.kesherDays || 0;
         const kEquiv = kesherDaysToKitchenShifts(kDays);
         list.push({
-          name: s.name,
-          department: dep.departmentName,
+          name: sName,
+          department: depName,
           key,
           midweek: hist.midweek || 0,
           weekend: hist.weekend || 0,
@@ -676,27 +750,6 @@ const ManagerScreen = () => {
       });
     });
 
-    Object.entries(combinedHistory).forEach(([key, hist]) => {
-      if (!seenKeys.has(key)) {
-        if (fullExemptKeys.has(key)) return;
-        const [name, dep] = key.split('_');
-        const kDays = hist.kesherDays || 0;
-        const kEquiv = kesherDaysToKitchenShifts(kDays);
-        list.push({
-          name,
-          department: dep || 'כללי',
-          key,
-          midweek: hist.midweek || 0,
-          weekend: hist.weekend || 0,
-          kitchenTotal: hist.total || 0,
-          kesherDays: kDays,
-          kesherEquiv: kEquiv,
-          effectiveTotal: hist.effectiveTotal !== undefined ? hist.effectiveTotal : ((hist.total || 0) + kEquiv),
-          isNew: false
-        });
-      }
-    });
-
     return list;
   }, [departmentsData, combinedHistory, managerOverrides]);
 
@@ -707,7 +760,8 @@ const ManagerScreen = () => {
         const id = `${dep.departmentName}_${idx}`;
         const isExemptRejected = managerOverrides[`${id}_exception`] === 'rejected';
         const activeExceptionType = isExemptRejected ? 'none' : (s.exceptionType || 'none');
-        if (activeExceptionType === 'full') count++;
+        const sName = (s.name || '').trim();
+        if (activeExceptionType === 'full' || s.exceptionType === 'full' || ['דמקה', 'דמקה אזנאו'].includes(sName)) count++;
       });
     });
     return count;
@@ -752,7 +806,10 @@ const ManagerScreen = () => {
       return;
     }
 
-    const [sName, sDep] = kesherSoldierKey.split('_');
+    const parts = kesherSoldierKey.split('_');
+    const sName = (parts[0] || '').trim();
+    const sDep = (parts.slice(1).join('_') || '').trim();
+    const normKey = `${sName}_${sDep}`;
     setKesherSubmitting(true);
 
     try {
@@ -766,17 +823,35 @@ const ManagerScreen = () => {
         createdAt: new Date().toISOString()
       };
 
-      const updatedEntries = [newEntry, ...(kesherEntries || [])];
+      const updatedEntries = [newEntry, ...(kesherEntries || []).map(entry => ({
+        ...entry,
+        soldierName: (entry.soldierName || '').trim(),
+        department: (entry.department || '').trim()
+      }))];
       await setDoc(doc(db, 'history', 'kesherSite'), { entries: updatedEntries });
 
       // סנכרון ישיר ל-history/stats
       const historyRef = doc(db, 'history', 'stats');
       const historySnap = await getDoc(historyRef);
-      const stats = historySnap.exists() ? historySnap.data() : {};
-      if (!stats[kesherSoldierKey]) {
-        stats[kesherSoldierKey] = { total: 0, midweek: 0, weekend: 0 };
+      const rawStats = historySnap.exists() ? historySnap.data() : {};
+      
+      const stats = {};
+      Object.entries(rawStats).forEach(([k, v]) => {
+        const p = k.split('_');
+        const nk = `${(p[0] || '').trim()}_${(p.slice(1).join('_') || '').trim()}`;
+        if (!stats[nk]) stats[nk] = { ...v };
+        else {
+          stats[nk].total = (stats[nk].total || 0) + (v.total || 0);
+          stats[nk].midweek = (stats[nk].midweek || 0) + (v.midweek || 0);
+          stats[nk].weekend = (stats[nk].weekend || 0) + (v.weekend || 0);
+          stats[nk].kesherDays = (stats[nk].kesherDays || 0) + (v.kesherDays || 0);
+        }
+      });
+
+      if (!stats[normKey]) {
+        stats[normKey] = { total: 0, midweek: 0, weekend: 0, kesherDays: 0 };
       }
-      stats[kesherSoldierKey].kesherDays = (stats[kesherSoldierKey].kesherDays || 0) + days;
+      stats[normKey].kesherDays = (stats[normKey].kesherDays || 0) + days;
       await setDoc(historyRef, stats);
 
       const addedEquiv = kesherDaysToKitchenShifts(days);
@@ -805,13 +880,29 @@ const ManagerScreen = () => {
       const updatedEntries = (kesherEntries || []).filter(e => e.id !== entryId);
       await setDoc(doc(db, 'history', 'kesherSite'), { entries: updatedEntries });
 
-      const key = `${entry.soldierName}_${entry.department}`;
+      const normName = (entry.soldierName || '').trim();
+      const normDep = (entry.department || '').trim();
+      const normKey = `${normName}_${normDep}`;
+
       const historyRef = doc(db, 'history', 'stats');
       const historySnap = await getDoc(historyRef);
       if (historySnap.exists()) {
-        const stats = historySnap.data();
-        if (stats[key]) {
-          stats[key].kesherDays = Math.max(0, (stats[key].kesherDays || 0) - entry.daysCount);
+        const rawStats = historySnap.data();
+        const stats = {};
+        Object.entries(rawStats).forEach(([k, v]) => {
+          const p = k.split('_');
+          const nk = `${(p[0] || '').trim()}_${(p.slice(1).join('_') || '').trim()}`;
+          if (!stats[nk]) stats[nk] = { ...v };
+          else {
+            stats[nk].total = (stats[nk].total || 0) + (v.total || 0);
+            stats[nk].midweek = (stats[nk].midweek || 0) + (v.midweek || 0);
+            stats[nk].weekend = (stats[nk].weekend || 0) + (v.weekend || 0);
+            stats[nk].kesherDays = (stats[nk].kesherDays || 0) + (v.kesherDays || 0);
+          }
+        });
+
+        if (stats[normKey]) {
+          stats[normKey].kesherDays = Math.max(0, (stats[normKey].kesherDays || 0) - entry.daysCount);
           await setDoc(historyRef, stats);
         }
       }

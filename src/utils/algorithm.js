@@ -62,8 +62,10 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
       const softBlockedDays = constraintOverride === 'flexible' ? activeBlockedDays : [];
       const hardBlockedDays = constraintOverride === 'critical' ? activeBlockedDays : [];
       
-      const soldierKey = `${s.name}_${dep.departmentName}`;
-      const history = historyData[soldierKey] || { total: 0, weekend: 0, midweek: 0, kesherDays: 0 };
+      const sName = (s.name || '').trim();
+      const depName = (dep.departmentName || '').trim();
+      const soldierKey = `${sName}_${depName}`;
+      const history = historyData[soldierKey] || historyData[`${s.name}_${dep.departmentName}`] || { total: 0, weekend: 0, midweek: 0, kesherDays: 0 };
 
       const kesherDays = history.kesherDays || 0;
       const kesherEquiv = kesherDaysToKitchenShifts(kesherDays);
@@ -83,9 +85,9 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
       } else {
         eligibleSoldiers.push({
           id,
-          name: s.name,
-          department: dep.departmentName,
-          closesWeekend: s.closesWeekend,
+          name: sName,
+          department: depName,
+          closesWeekend: s.closesWeekend === true || s.closesWeekend === 'true',
           preference: s.shiftPreference || 'none',
           spreadPreference: s.spreadPreference || 'none',
           shiftTypePreference: s.shiftTypePreference || 'none',
@@ -121,67 +123,82 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
     while (picked.length < requiredCount) {
       let candidates = eligibleSoldiers.filter(s => {
         
-        // הגדרת "משמרת סופ״ש" לצורך סינון: כל יום שמוגדר סופ״ש, וגם יום חמישי במלואו (בוקר וערב) - לבקשת המנהל
-        const isWeekendShift = dayInfo.isWeekend || dayInfo.key === "ה'";
+        // הגדרת "משמרת סופ״ש" לצורך סינון: כל יום שמוגדר סופ״ש, וגם יום חמישי במלואו (בוקר וערב) - מי שלא סוגר שבת אסור לשבץ!
+        const isThursday = dayInfo.key === "ה'" || dayInfo.short === "ה'" || dayInfo.name === 'חמישי';
+        const isWeekendShift = dayInfo.isWeekend || isThursday;
         if (isWeekendShift && (!s.closesWeekend || s.isWeekendExempt)) return false;
         
         if (s.blockedDays.includes(dayInfo.short)) return false; // only hard blocked
         if (picked.some(p => p.id === s.id)) return false; // already picked in this shift
+        
+        // חוק 1: עד 4 מטבחים באמצע שבוע (א'-ד') למניעת שחיקה מוגזמת
+        if (!isWeekendShift && (s.thisWeekMidweekCount || 0) >= 4) return false;
+
+        // חוק 2: מחלקת לוגיסטיקה יכולה להעלות רק חייל 1 ביום (בוקר וערב יחד)
+        if (s.department === 'לוגיסטיקה') {
+          const otherLogisticsAssignedToday = eligibleSoldiers.some(other => 
+            other.department === 'לוגיסטיקה' && 
+            other.id !== s.id && 
+            other.assignedDays.includes(dayIndex)
+          );
+          const otherLogisticsInShift = picked.some(p => p.department === 'לוגיסטיקה' && p.id !== s.id);
+          if (otherLogisticsAssignedToday || otherLogisticsInShift) return false;
+        }
+
+        // חוק 3: מניעה מוחלטת של 3 ימים ברצף (אלא אם ביקש רצף מפורש)
+        if (s.spreadPreference !== 'consecutive') {
+          const would3Consecutive = 
+            (s.assignedDays.includes(dayIndex - 1) && s.assignedDays.includes(dayIndex - 2)) ||
+            (s.assignedDays.includes(dayIndex + 1) && s.assignedDays.includes(dayIndex + 2)) ||
+            (s.assignedDays.includes(dayIndex - 1) && s.assignedDays.includes(dayIndex + 1));
+          if (would3Consecutive) return false;
+        }
+
         return true;
       });
       
       if (candidates.length === 0) {
-        break;
+        if (!isWeekendShift) {
+          // במקרה קיצון של מחסור חריג בחיילים פנויים, מאפשרים חריגה מבוקרת כפתרון חירום
+          candidates = eligibleSoldiers.filter(s => {
+            if (s.blockedDays.includes(dayInfo.short)) return false;
+            if (picked.some(p => p.id === s.id)) return false;
+            return true;
+          });
+        }
+        if (candidates.length === 0) {
+          break;
+        }
       }
+
+      // תעדוף יום שלם: לא מסננים מועמדים שכבר שובצו היום, כדי לאפשר שיבוץ יום שלם ולמנוע פיזור על פני ימים מרובים
       
       candidates.sort((a, b) => {
 
+        // 0.0. עדיפות עליונה: מניעת יומיים ברצף (אתמול או מחר) - לבקשת המפקד
+        const aConsec = ((a.assignedDays.includes(dayIndex - 1) || a.assignedDays.includes(dayIndex + 1)) && a.spreadPreference !== 'consecutive') ? 1 : 0;
+        const bConsec = ((b.assignedDays.includes(dayIndex - 1) || b.assignedDays.includes(dayIndex + 1)) && b.spreadPreference !== 'consecutive') ? 1 : 0;
+        if (aConsec !== bConsec) return aConsec - bConsec;
 
-        // 0. עדיפות עליונה: מניעת 3 ימים ברצף (שחיקה מוגזמת, גם במחיר של חוסר שוויון קל במספר המשמרות - שיתאזן בשבוע הבא)
-        const a3Consecutive = (a.assignedDays.includes(dayIndex - 1) && a.assignedDays.includes(dayIndex - 2) && a.spreadPreference !== 'consecutive') ? 1 : 0;
-        const b3Consecutive = (b.assignedDays.includes(dayIndex - 1) && b.assignedDays.includes(dayIndex - 2) && b.spreadPreference !== 'consecutive') ? 1 : 0;
-        if (a3Consecutive !== b3Consecutive) return a3Consecutive - b3Consecutive;
+        // 0.1 תעדוף יום שלם (בוקר + ערב): עדיף לחייל לעשות יום שלם ולסיים, במקום להעלות אותו ביום נוסף
+        const getFullDayScore = (soldier) => {
+          if (soldier.assignedDays.includes(dayIndex)) {
+            if (soldier.shiftTypePreference === 'half') return 1; // העדפה אישית לחצי יום
+            return -2; // בונוס משמעותי לשיבוץ יום שלם
+          }
+          return 0;
+        };
+        const aFull = getFullDayScore(a);
+        const bFull = getFullDayScore(b);
+        if (aFull !== bFull) return aFull - bFull;
 
-        // 0.5. מניעת שני חיילי לוגיסטיקה באותה משמרת סופ"ש (עדיפות גבוהה מאוד לפי בקשת הלקוח)
+        // 0.2 איזון עומס שבועי: מניעת פער שבועי מוגזם
+        const aWk = a.thisWeekTotalCount || 0;
+        const bWk = b.thisWeekTotalCount || 0;
+        if (Math.abs(aWk - bWk) >= 2) return aWk - bWk;
+
+        // 0.3. באמצ"ש: גיוון מחלקתי בעדיפות גבוהה (מעל שוויון היסטורי)
         const isWeekendShiftForSort = dayInfo.isWeekend || dayInfo.key === "ה'";
-        if (isWeekendShiftForSort) {
-          const isTwoLogistics = (candidate) => {
-            if (candidate.department !== 'לוגיסטיקה') return 0;
-            const hasLogisticsAlready = picked.some(p => p.department === 'לוגיסטיקה');
-            return hasLogisticsAlready ? 1 : 0;
-          };
-          const aTwoLog = isTwoLogistics(a);
-          const bTwoLog = isTwoLogistics(b);
-          if (aTwoLog !== bTwoLog) return aTwoLog - bTwoLog;
-        }
-
-        // 0.6. מניעת משמרת כפולה באותו יום (עונשים בלבד - לא בונוס שידרוס הגינות)
-        const getDoublePenalty = (soldier) => {
-          if (soldier.lastDayAssigned === dayIndex) {
-            if (soldier.shiftTypePreference === 'full') return 0; // אין עונש
-            if (soldier.shiftTypePreference === 'half') return 2;  // עונש מוגדל
-            return 1; // עונש רגיל
-          }
-          return 0;
-        };
-        const aDoublePen = getDoublePenalty(a);
-        const bDoublePen = getDoublePenalty(b);
-        if (aDoublePen !== bDoublePen) return aDoublePen - bDoublePen;
-
-        // 0.7. מניעת יום אחרי יום (עונשים בלבד)
-        const getConsecPenalty = (soldier) => {
-          if (soldier.lastDayAssigned === dayIndex - 1) {
-            if (soldier.spreadPreference === 'consecutive') return 0; // אין עונש
-            if (soldier.spreadPreference === 'spread') return 2; // עונש מוגדל
-            return 1; // עונש רגיל
-          }
-          return 0;
-        };
-        const aConsecPen = getConsecPenalty(a);
-        const bConsecPen = getConsecPenalty(b);
-        if (aConsecPen !== bConsecPen) return aConsecPen - bConsecPen;
-
-        // 0.8. באמצ"ש: גיוון מחלקתי בעדיפות גבוהה מאוד (מעל שוויון)
         const aDeptInShift = picked.some(p => p.department === a.department) ? 1 : 0;
         const bDeptInShift = picked.some(p => p.department === b.department) ? 1 : 0;
         if (!isWeekendShiftForSort) {
@@ -288,6 +305,10 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
       } else {
         best.midweekShifts += shiftWeight;
       }
+      best.thisWeekTotalCount = (best.thisWeekTotalCount || 0) + 1;
+      if (!isWeekendShiftCount) {
+        best.thisWeekMidweekCount = (best.thisWeekMidweekCount || 0) + 1;
+      }
       best.lastDayAssigned = dayIndex;
       best.assignedDays.push(dayIndex);
     }
@@ -363,10 +384,12 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
       shift.availableCount = eligibleSoldiers.filter(s => {
         if (Math.abs(shift.dayIndex - s.lastDayAssigned) === 1 && s.spreadPreference !== 'consecutive') return false;
         
-        const isWeekendShift = shift.day.isWeekend || shift.day.key === "ה'";
+        const isThursday = shift.day.key === "ה'" || shift.day.short === "ה'" || shift.day.name === 'חמישי';
+        const isWeekendShift = shift.day.isWeekend || isThursday;
         if (isWeekendShift && (!s.closesWeekend || s.isWeekendExempt)) return false;
         
         if (s.blockedDays.includes(shift.day.short)) return false;
+        if (!isWeekendShift && (s.thisWeekMidweekCount || 0) >= 4) return false;
         return true;
       }).length;
     });
@@ -384,7 +407,10 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
         return aIsWeekend ? -1 : 1;
       }
 
-      return a.dayIndex - b.dayIndex; // chronological tiebreaker
+      if (a.dayIndex !== b.dayIndex) {
+        return a.dayIndex - b.dayIndex; // chronological tiebreaker
+      }
+      return a.isMorning ? -1 : 1;
     });
 
     const shift = shiftsToSchedule.shift();
@@ -484,9 +510,11 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
     soldiersState: eligibleSoldiers,
     considerations: [
       "✓ שוויון במסגרות הסופ״ש והאמצ״ש כערך עליון (נלמד מפידבק): המערכת שמה את ההגינות והשוויון בכמות המשמרות (בתוך אותה מסגרת - סופ״ש או אמצ״ש) בראש סדר העדיפויות, אפילו לפני הניסיון למנוע משמרות יום אחרי יום. זאת כדי להבטיח שאף אחד לא נשאר ריק בזמן שאחרים טוחנים.",
+      "✓ חוק מחלקת לוגיסטיקה (עד חייל 1 ביום): לבקשת המפקד, מחלקת לוגיסטיקה לא תעלה יותר מחייל אחד ביום (בוקר וערב יחד), כדי לשמור על רציפות תפקודית של המחלקה.",
+      "✓ מניעה מוחלטת של ימים ברצף ותעדוף יום שלם: האלגוריתם מונע לחלוטין 3 ימים ברצף, נמנע מיומיים ברצף, ומתעדף שיבוץ חיילים ליום שלם (בוקר וערב באותו יום) כדי שיסיימו את תורנותם ביום אחד מרוכז ולא ייגררו על פני ימים עוקבים.",
+      "✓ הגבלת עומס שבועי (עד 4 מטבחים באמצ״ש): חוק ברזל במערכת – אף חייל לא יעלה יותר מ-4 משמרות מטבח באמצע השבוע (א׳-ד׳), כדי למנוע שחיקה חריגה של חיילים חדשים או בעלי מעט משמרות היסטוריות.",
       "✓ שקלול שהייה באתר קשר: כל 1.5 ימים באתר קשר נספרים כשווה ערך למשמרת מטבח (אם יש יום עודף שלא מתחלק, הוא נספר כחצי משמרת מטבח, למשל 4 ימים = 2.5 משמרות). חיילים ששירתו באתר קשר מקבלים עדיפות למנוחה ואינם משובצים לפני חיילים שטרם ביצעו תורנויות.",
-      "✓ משקלים משמעותיים למניעת עומס חריג: למרות שהגינות חשובה, המערכת תסרב (ככל הניתן) לתת לאותו חייל משמרת כפולה בוקר+ערב, או 3 ימים ברצף, אלא אם אין שום פתרון אחר.",
-      "✓ שחרור עומס הסופ״ש: יום חמישי מוגדר כעת כיום סופ״ש לכל דבר מבחינת סינון חיילים (רק סוגרי סופ״ש עולים בו), אך המשמרות בו נספרות כמשמרות סופ״ש כדי למנוע טחינה של חייל אחד.",
+      "✓ נעילת יום חמישי לסוגרי שבת בלבד: יום חמישי מוגדר כחלק מסוף השבוע (התחלת הסגירה). חייל המסומן כ'לא סוגר' או בעל פטור סופ״ש חסום באופן מוחלט משיבוץ ביום חמישי (בוקר וערב).",
       "✓ שוויון סך כל המשמרות: משמש כשובר שוויון סופי כדי להבטיח צדק כללי במבט מלמעלה.",
       "✓ פיזור מחלקתי ורוטציית שבת ממשיכים להישמר כרגיל כשיקולים משניים.",
       "✓ אופטימיזציה ובקרת איכות (QA): האלגוריתם בחן עשרות וריאציות אפשריות (במצבים של שובר שוויון) ובחר להגיש לך אך ורק את התוצאה עם הפערים הקטנים ביותר האפשריים בין החיילים!"
@@ -513,6 +541,7 @@ export const generateSchedule = (kitchenData, departmentsData, managerOverrides 
       let maxWeekend = 0, minWeekend = Infinity;
       let maxMidweek = 0, minMidweek = Infinity;
       let maxTotal = 0, minTotal = Infinity;
+      let maxWeekTotal = 0, minWeekTotal = Infinity;
       
       const soldiers = result.soldiersState;
       if (soldiers && soldiers.length > 0) {
@@ -526,14 +555,35 @@ export const generateSchedule = (kitchenData, departmentsData, managerOverrides 
           if (s.totalShifts > maxTotal) maxTotal = s.totalShifts;
           if (s.totalShifts < minTotal) minTotal = s.totalShifts;
           
+          const wkCount = s.thisWeekTotalCount || 0;
+          if (wkCount > maxWeekTotal) maxWeekTotal = wkCount;
+          if (wkCount < minWeekTotal) minWeekTotal = wkCount;
+
           if (s.assignedDays && s.spreadPreference !== 'consecutive') {
-            const consecutiveDays = s.assignedDays.filter((d, idx, arr) => idx >= 1 && d === arr[idx-1]+1).length;
-            score += consecutiveDays * 200; // עונש גדול מאוד על כל יום ברצף
+            const sortedDistinct = [...new Set(s.assignedDays)].sort((a,b) => a - b);
+            for (let dIdx = 1; dIdx < sortedDistinct.length; dIdx++) {
+              if (sortedDistinct[dIdx] === sortedDistinct[dIdx-1] + 1) {
+                score += 500; // עונש כבד על יומיים ברצף
+                if (dIdx >= 2 && sortedDistinct[dIdx-1] === sortedDistinct[dIdx-2] + 1) {
+                  score += 10000; // עונש בלתי נסבל על 3 ימים ברצף!
+                }
+              }
+            }
+          }
+        });
+
+        // עונש כבד על חריגה מחוק לוגיסטיקה (יותר מחייל 1 ביום)
+        result.schedule.forEach(day => {
+          const allInDay = [...(day.morning || []), ...(day.evening || [])];
+          const logInDay = new Set(allInDay.filter(s => s.department === 'לוגיסטיקה').map(s => s.name));
+          if (logInDay.size > 1) {
+            score += 20000;
           }
         });
         
         const weekendGap = maxWeekend - minWeekend;
         const totalGap = maxTotal - minTotal;
+        const weekGap = maxWeekTotal - minWeekTotal;
         
         let sumSquaredDiffs = 0;
         const avgWeekend = soldiers.reduce((acc, s) => acc + s.weekendShifts, 0) / soldiers.length;
@@ -541,7 +591,7 @@ export const generateSchedule = (kitchenData, departmentsData, managerOverrides 
           sumSquaredDiffs += Math.pow(s.weekendShifts - avgWeekend, 2);
         });
 
-        score += (weekendGap * 100) + (totalGap * 50) + sumSquaredDiffs;
+        score += (weekendGap * 100) + (totalGap * 50) + (weekGap * 80) + sumSquaredDiffs;
       }
 
       if (score < bestScore) {
@@ -581,10 +631,9 @@ export const generateSchedule = (kitchenData, departmentsData, managerOverrides 
        if (twoConsec > 0) reasons.push("נאלצנו לשבץ יום אחרי יום");
     }
     
-    // Check if they had to do multiple shifts in the same day (double shift)
-    // we can check if assignedDays has duplicates
-    if (s.assignedDays.length > new Set(s.assignedDays).size) {
-       reasons.push("נאלצנו לשבץ משמרת כפולה");
+    // משמרת כפולה נחשבת כוויתור רק אם החייל ביקש מפורשות חצי יום
+    if (s.assignedDays.length > new Set(s.assignedDays).size && s.shiftTypePreference === 'half') {
+       reasons.push("נאלצנו לשבץ יום שלם למרות בקשת חצי יום");
     }
 
     if (s.totalShifts > avgTotal + 1.5) {

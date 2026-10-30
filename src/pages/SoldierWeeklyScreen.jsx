@@ -36,13 +36,34 @@ const SoldierWeeklyScreen = () => {
     };
   }, []);
 
+  // רשימת חיילים ייחודית ללא כפילויות וללא רווחים עודפים עבור התפריטים הנפתחים
+  const uniqueSoldiersList = React.useMemo(() => {
+    const list = [];
+    const seen = new Set();
+    (departmentsData || []).forEach(d => {
+      const depName = (d.departmentName || '').trim();
+      (d.soldiers || []).forEach(soldier => {
+        const sName = (soldier.name || '').trim();
+        if (!sName) return;
+        const key = `${sName}_${depName}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          list.push({ name: sName, department: depName, key });
+        }
+      });
+    });
+    return list;
+  }, [departmentsData]);
+
   // עדכון בלת״ם (החלפת חייל במשמרת)
   const handleBaltamChange = async (dayIdx, shiftTime, idx, oldPerson, newPersonStr) => {
     if (!newPersonStr || !justiceData?.schedule) {
       setEditingShift(null);
       return;
     }
-    const [newName, newDep] = newPersonStr.split('_');
+    const parts = newPersonStr.split('_');
+    const newName = (parts[0] || '').trim();
+    const newDep = (parts.slice(1).join('_') || '').trim();
 
     const newSchedule = [...justiceData.schedule];
     const targetShift = [...(newSchedule[dayIdx][shiftTime] || [])];
@@ -72,7 +93,9 @@ const SoldierWeeklyScreen = () => {
       setAddingShift(null);
       return;
     }
-    const [newName, newDep] = newPersonStr.split('_');
+    const parts = newPersonStr.split('_');
+    const newName = (parts[0] || '').trim();
+    const newDep = (parts.slice(1).join('_') || '').trim();
 
     const newSchedule = [...justiceData.schedule];
     if (!newSchedule[dayIdx][shiftTime]) {
@@ -268,11 +291,11 @@ const SoldierWeeklyScreen = () => {
                                  >
                                    <option value="">בחר מחליף מהרשימה...</option>
                                    <option value="__REMOVE__" style={{ color: '#ef4444', fontWeight: 'bold' }}>❌ הסר תורן ממשמרת זו</option>
-                                   {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
-                                     <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
-                                       {soldier.name} ({d.departmentName})
+                                   {uniqueSoldiersList.map(soldier => (
+                                     <option key={soldier.key} value={soldier.key}>
+                                       {soldier.name} ({soldier.department})
                                      </option>
-                                   )))}
+                                   ))}
                                  </select>
                                ) : (
                                  <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.35rem', color: isSlotEdited ? '#34d399' : 'var(--text-primary)', fontWeight: isSlotEdited ? 600 : 'normal' }}>
@@ -306,11 +329,11 @@ const SoldierWeeklyScreen = () => {
                               style={{ width: '100%', padding: '0.35rem', backgroundColor: '#222', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px', fontSize: '0.82rem' }}
                             >
                               <option value="">בחר חייל להוספה...</option>
-                              {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
-                                <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
-                                  {soldier.name} ({d.departmentName})
+                              {uniqueSoldiersList.map(soldier => (
+                                <option key={soldier.key} value={soldier.key}>
+                                  {soldier.name} ({soldier.department})
                                 </option>
-                              )))}
+                              ))}
                             </select>
                           </div>
                         ) : (
@@ -400,11 +423,11 @@ const SoldierWeeklyScreen = () => {
                                  >
                                    <option value="">בחר מחליף מהרשימה...</option>
                                    <option value="__REMOVE__" style={{ color: '#ef4444', fontWeight: 'bold' }}>❌ הסר תורן ממשמרת זו</option>
-                                   {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
-                                     <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
-                                       {soldier.name} ({d.departmentName})
+                                   {uniqueSoldiersList.map(soldier => (
+                                     <option key={soldier.key} value={soldier.key}>
+                                       {soldier.name} ({soldier.department})
                                      </option>
-                                   )))}
+                                   ))}
                                  </select>
                                ) : (
                                  <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.35rem', color: isSlotEdited ? '#34d399' : 'var(--text-primary)', fontWeight: isSlotEdited ? 600 : 'normal' }}>
@@ -438,11 +461,11 @@ const SoldierWeeklyScreen = () => {
                               style={{ width: '100%', padding: '0.35rem', backgroundColor: '#222', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px', fontSize: '0.82rem' }}
                             >
                               <option value="">בחר חייל להוספה...</option>
-                              {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
-                                <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
-                                  {soldier.name} ({d.departmentName})
+                              {uniqueSoldiersList.map(soldier => (
+                                <option key={soldier.key} value={soldier.key}>
+                                  {soldier.name} ({soldier.department})
                                 </option>
-                              )))}
+                              ))}
                             </select>
                           </div>
                         ) : (

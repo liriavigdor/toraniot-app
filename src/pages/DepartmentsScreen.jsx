@@ -78,8 +78,23 @@ const DepartmentsScreen = () => {
       return;
     }
 
-    // סינון שורות ריקות (כאלה שלא הזינו בהן שם)
-    const validSoldiers = soldiers.filter(s => s.name.trim() !== '');
+    // סינון שורות ריקות, ניקוי רווחים מיותרים ומניעת כפילויות של אותו חייל
+    const seenNames = new Set();
+    const validSoldiers = [];
+    
+    soldiers.forEach(s => {
+      const trimmedName = (s.name || '').trim();
+      if (trimmedName !== '' && !seenNames.has(trimmedName)) {
+        seenNames.add(trimmedName);
+        validSoldiers.push({
+          ...s,
+          name: trimmedName,
+          exceptionReason: (s.exceptionReason || '').trim(),
+          constraintReason: (s.constraintReason || '').trim(),
+          preferredBuddy: (s.preferredBuddy || '').trim()
+        });
+      }
+    });
     
     if (validSoldiers.length === 0) {
       setMessage('נא להזין לפחות חייל אחד.');
@@ -91,7 +106,7 @@ const DepartmentsScreen = () => {
 
     try {
       await setDoc(doc(db, 'activeDepartments', selectedDepartment), {
-        departmentName: selectedDepartment,
+        departmentName: selectedDepartment.trim(),
         soldiers: validSoldiers,
         updatedAt: serverTimestamp()
       });
