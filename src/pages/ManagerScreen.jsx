@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { ClipboardCheck, CheckCircle2, AlertCircle, ArrowDown, FileText, XCircle, Share2, ChevronDown, ChevronUp, BrainCircuit, MessageSquareText, FileCheck, Unlock, PenLine, CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2, Scale, Radio, Search, Filter, RotateCcw, AlertTriangle } from 'lucide-react';
+import { ClipboardCheck, CheckCircle2, AlertCircle, ArrowDown, FileText, XCircle, Share2, ChevronDown, ChevronUp, BrainCircuit, MessageSquareText, FileCheck, Unlock, PenLine, CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2, Scale, Radio, Search, Filter, RotateCcw, AlertTriangle, GraduationCap } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { db } from '../firebase/firebase';
-import { doc, collection, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
+import { doc, collection, onSnapshot, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { generateSchedule, SchedulingConflictError, kesherDaysToKitchenShifts } from '../utils/algorithm';
 import { getDefaultSunday, formatDayDate, getWeekRangeStr, addDaysToDateStr } from '../utils/dateUtils';
 
@@ -140,6 +140,55 @@ const ManagerScreen = () => {
       unsubKesher();
     };
   }, []);
+
+  // וידוא שכל חייל ישן/פעיל שאינו בשבוע חסד מקבל מספר תורנויות ממוצע בטבלת הצדק (מניעת מצב של 0 תורנויות)
+  useEffect(() => {
+    if (!departmentsData || departmentsData.length === 0 || !historyData) return;
+    
+    let vetTotal = 0, vetMid = 0, vetWeek = 0, vetCount = 0;
+    Object.entries(historyData).forEach(([k, v]) => {
+      const tot = Number(v.total || 0);
+      if (tot > 0) {
+        vetTotal += tot;
+        vetMid += Number(v.midweek || 0);
+        vetWeek += Number(v.weekend || 0);
+        vetCount++;
+      }
+    });
+    const avgTotal = vetCount > 0 ? Math.floor(vetTotal / vetCount) : 5;
+    const avgWeek = vetCount > 0 ? Math.round(vetWeek / vetCount) : 1;
+    const avgMid = Math.max(0, avgTotal - avgWeek);
+
+    let needsSync = false;
+    const updatedStats = { ...historyData };
+
+    departmentsData.forEach(dep => {
+      const depName = (dep.departmentName || '').trim();
+      (dep.soldiers || []).forEach(s => {
+        if (s.isNewSoldier || s.exceptionType === 'full') return;
+        const sName = (s.name || '').trim();
+        if (!sName) return;
+        const key = `${sName}_${depName}`;
+        const entry = updatedStats[key];
+        const hasRecorded = entry && (Number(entry.total || 0) > 0 || Number(entry.kesherDays || 0) > 0);
+        if (!hasRecorded) {
+          updatedStats[key] = {
+            total: avgTotal,
+            midweek: avgMid,
+            weekend: avgWeek,
+            kesherDays: Number(entry?.kesherDays || 0)
+          };
+          needsSync = true;
+        }
+      });
+    });
+
+    if (needsSync) {
+      setDoc(doc(db, 'history', 'stats'), updatedStats, { merge: true }).catch(err => {
+        console.error("Error auto-syncing baseline shifts to history/stats:", err);
+      });
+    }
+  }, [departmentsData, historyData]);
 
   const submittedDepartments = departmentsData.map(d => d.departmentName);
   const missingDepartments = EXPECTED_DEPARTMENTS.filter(d => !submittedDepartments.includes(d));
@@ -293,6 +342,108 @@ const ManagerScreen = () => {
     }, 4000);
   };
 
+  // רשימת כל החיילים הנמצאים כרגע ב"שבוע חסד" (isNewSoldier === true)
+  const graceSoldiers = React.useMemo(() => {
+    const list = [];
+    (departmentsData || []).forEach(dep => {
+      const depName = (dep.departmentName || '').trim();
+      (dep.soldiers || []).forEach(s => {
+        if (s.isNewSoldier) {
+          list.push({ name: (s.name || '').trim(), department: depName, key: `${(s.name || '').trim()}_${depName}` });
+        }
+      });
+    });
+    return list;
+  }, [departmentsData]);
+
+  // סיום שבוע חסד לחיילים חדשים: מעדכן את טבלת הצדק בממוצע התורנויות ומסיר את שבוע החסד מ-activeDepartments
+  const graduateGraceWeekSoldiers = async () => {
+    if (graceSoldiers.length === 0) return { count: 0, names: [], avgTotal: 5 };
+
+    // חישוב ממוצע תורנויות של חיילי היחידה הוותיקים (שאינם בשבוע חסד ואינם בעלי פטור מלא)
+    let vetTotalSum = 0;
+    let vetMidSum = 0;
+    let vetWeekSum = 0;
+    let vetCount = 0;
+
+    (departmentsData || []).forEach(dep => {
+      const depName = (dep.departmentName || '').trim();
+      (dep.soldiers || []).forEach(s => {
+        if (s.isNewSoldier || s.exceptionType === 'full') return;
+        const key = `${(s.name || '').trim()}_${depName}`;
+        const hist = combinedHistory[key];
+        if (hist && ((hist.total || 0) > 0 || (hist.effectiveTotal || 0) > 0 || (hist.kesherDays || 0) > 0)) {
+          vetTotalSum += (hist.effectiveTotal !== undefined ? hist.effectiveTotal : (hist.total || 0));
+          vetMidSum += (hist.effectiveMidweek !== undefined ? hist.effectiveMidweek : (hist.midweek || 0));
+          vetWeekSum += (hist.effectiveWeekend !== undefined ? hist.effectiveWeekend : (hist.weekend || 0));
+          vetCount++;
+        }
+      });
+    });
+
+    const avgCompanyTotal = vetCount > 0 ? Math.floor(vetTotalSum / vetCount) : 5;
+    const avgCompanyWeek = vetCount > 0 ? Math.round(vetWeekSum / vetCount) : 1;
+    const avgCompanyMid = Math.max(0, avgCompanyTotal - avgCompanyWeek);
+
+    // 1. עדכון טבלת הצדק (history/stats) עם ממוצע התורנויות
+    const historyRef = doc(db, 'history', 'stats');
+    const historySnap = await getDoc(historyRef);
+    const globalStats = historySnap.exists() ? { ...historySnap.data() } : {};
+
+    graceSoldiers.forEach(({ name, department }) => {
+      const key = `${name}_${department}`;
+      const current = globalStats[key] || { total: 0, midweek: 0, weekend: 0, kesherDays: 0 };
+      globalStats[key] = {
+        total: Math.max(Number(current.total || 0), avgCompanyTotal),
+        midweek: Math.max(Number(current.midweek || 0), avgCompanyMid),
+        weekend: Math.max(Number(current.weekend || 0), avgCompanyWeek),
+        kesherDays: Number(current.kesherDays || 0)
+      };
+    });
+
+    await setDoc(historyRef, globalStats);
+
+    // 2. הסרת סימון 'שבוע חסד' ממסך הסד״כ של המחלקות (activeDepartments) כדי שהכפתור ייעלם
+    for (const dep of (departmentsData || [])) {
+      const depName = (dep.departmentName || '').trim();
+      let hasChange = false;
+      const updatedSoldiers = (dep.soldiers || []).map(s => {
+        if (s.isNewSoldier) {
+          hasChange = true;
+          return { ...s, isNewSoldier: false };
+        }
+        return s;
+      });
+
+      if (hasChange) {
+        await setDoc(doc(db, 'activeDepartments', depName), {
+          ...dep,
+          departmentName: depName,
+          soldiers: updatedSoldiers,
+          updatedAt: serverTimestamp()
+        });
+      }
+    }
+
+    return {
+      count: graceSoldiers.length,
+      names: graceSoldiers.map(g => g.name),
+      avgTotal: avgCompanyTotal
+    };
+  };
+
+  const handleManualGraduate = async () => {
+    if (!window.confirm("פעולה זו תסיים את שבוע החסד של החיילים, תסיר את סימון 'שבוע חסד' במסך המחלקות, ותעדכן אותם בטבלת הצדק עם ממוצע התורנויות היחידתי. להמשיך?")) {
+      return;
+    }
+    const res = await graduateGraceWeekSoldiers();
+    if (res.count > 0) {
+      alert(`שבוע החסד הסתיים בהצלחה עבור: ${res.names.join(', ')}.\n\nשבוע החסד הוסר והחיילים עודכנו בטבלת הצדק עם ממוצע של ${res.avgTotal} תורנויות לקראת השבועות הבאים!`);
+    } else {
+      alert("לא נמצאו חיילים בשבוע חסד.");
+    }
+  };
+
   // העברת השבצ״ק מהאלגוריתם (שלב 4) לטבלה השבועית לעריכה (שלב 5)
   const handleTransferToStep5 = async () => {
     if (!algorithmResult) return;
@@ -335,6 +486,16 @@ const ManagerScreen = () => {
       signedBy: null,
       weekContributions: null
     });
+
+    // סיום שבוע חסד לחיילים חדשים עם יצירת השבצ״ק החדש
+    if (graceSoldiers.length > 0) {
+      const graduated = await graduateGraceWeekSoldiers();
+      if (graduated.count > 0) {
+        setTimeout(() => {
+          alert(`🎉 שבוע החסד הסתיים עבור: ${graduated.names.join(', ')}!\n\nשבוע החסד הוסר והחיילים עודכנו בטבלת הצדק עם ממוצע של ${graduated.avgTotal} תורנויות לקראת השבוע החדש.`);
+        }, 300);
+      }
+    }
 
     setTransferredSuccess(true);
     setTimeout(() => {
@@ -426,6 +587,11 @@ const ManagerScreen = () => {
       });
 
       await setDoc(historyRef, globalStats);
+
+      // סיום שבוע חסד לחיילים חדשים שהשלימו את שבוע החסד שלהם עם סגירת השבוע
+      if (graceSoldiers.length > 0) {
+        await graduateGraceWeekSoldiers();
+      }
 
       await setDoc(doc(db, 'justiceTable', 'current'), {
         ...justiceData,
@@ -718,6 +884,32 @@ const ManagerScreen = () => {
       });
     });
 
+    // חישוב ממוצע תורנויות של חיילי היחידה הוותיקים לצורך הגנה על חיילים חדשים
+    let vetTotalSum = 0;
+    let vetMidSum = 0;
+    let vetWeekSum = 0;
+    let vetCount = 0;
+
+    (departmentsData || []).forEach(dep => {
+      const depName = (dep.departmentName || '').trim();
+      (dep.soldiers || []).forEach(s => {
+        if (s.isNewSoldier || s.exceptionType === 'full') return;
+        const sName = (s.name || '').trim();
+        const key = `${sName}_${depName}`;
+        const hist = combinedHistory[key];
+        if (hist && ((hist.total || 0) > 0 || (hist.effectiveTotal || 0) > 0 || (hist.kesherDays || 0) > 0)) {
+          vetTotalSum += (hist.effectiveTotal !== undefined ? hist.effectiveTotal : (hist.total || 0));
+          vetMidSum += (hist.effectiveMidweek !== undefined ? hist.effectiveMidweek : (hist.midweek || 0));
+          vetWeekSum += (hist.effectiveWeekend !== undefined ? hist.effectiveWeekend : (hist.weekend || 0));
+          vetCount++;
+        }
+      });
+    });
+
+    const avgCompanyTotal = vetCount > 0 ? Math.floor(vetTotalSum / vetCount) : 5;
+    const avgCompanyWeek = vetCount > 0 ? Math.round(vetWeekSum / vetCount) : 1;
+    const avgCompanyMid = Math.max(0, avgCompanyTotal - avgCompanyWeek);
+
     (departmentsData || []).forEach(dep => {
       const depName = (dep.departmentName || '').trim();
       (dep.soldiers || []).forEach(s => {
@@ -729,23 +921,37 @@ const ManagerScreen = () => {
         if (seenKeys.has(key)) return;
         seenKeys.add(key);
 
-        // אם לחייל יש פטור מלא (כולל דמקה או פטורים נוספים) - מסירים אותו מטבלת הצדק
+        // אם לחייל יש פטור מלא - מסירים אותו מטבלת הצדק (חיילים בשבוע חסד מוצגים עם תג חסד ומספר ממוצע)
         if (fullExemptKeys.has(key) || ['דמקה', 'דמקה אזנאו'].includes(sName) || s.exceptionType === 'full') return;
 
-        const hist = combinedHistory[key] || { total: 0, midweek: 0, weekend: 0, kesherDays: 0, effectiveTotal: 0 };
-        const kDays = hist.kesherDays || 0;
+        const hist = combinedHistory[key];
+        const hasRecordedHistory = hist && ((hist.total || 0) > 0 || (hist.kesherDays || 0) > 0);
+        const kDays = hist?.kesherDays || 0;
         const kEquiv = kesherDaysToKitchenShifts(kDays);
+        let effTotal = hist ? (hist.effectiveTotal !== undefined ? hist.effectiveTotal : ((hist.total || 0) + kEquiv)) : 0;
+        let mid = hist?.midweek || 0;
+        let week = hist?.weekend || 0;
+        let kTotal = hist?.total || 0;
+
+        // כל חייל שמתווסף למחלקה ואין לו תורנויות - מקבל אוטומטית את מספר התורנויות הממוצע בטבלת הצדק (למשל מעיין)
+        if (!hasRecordedHistory) {
+          effTotal = avgCompanyTotal;
+          mid = avgCompanyMid;
+          week = avgCompanyWeek;
+          kTotal = avgCompanyTotal;
+        }
+
         list.push({
           name: sName,
           department: depName,
           key,
-          midweek: hist.midweek || 0,
-          weekend: hist.weekend || 0,
-          kitchenTotal: hist.total || 0,
+          midweek: mid,
+          weekend: week,
+          kitchenTotal: kTotal,
           kesherDays: kDays,
           kesherEquiv: kEquiv,
-          effectiveTotal: hist.effectiveTotal !== undefined ? hist.effectiveTotal : ((hist.total || 0) + kEquiv),
-          isNew: s.isNewSoldier
+          effectiveTotal: effTotal,
+          isNew: !!s.isNewSoldier
         });
       });
     });
@@ -2070,18 +2276,26 @@ const ManagerScreen = () => {
                                          </option>
                                        )))}
                                      </select>
-                                   ) : (
-                                     <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.35rem', color: isSlotEdited ? '#34d399' : 'var(--text-primary)', fontWeight: isSlotEdited ? 600 : 'normal' }}>
-                                       {s.name} <span style={{ fontSize: '0.75rem', opacity: isSlotEdited ? 0.9 : 0.6 }}>({s.department})</span>
-                                       {isSlotEdited ? (
-                                         <span style={{ fontSize: '0.68rem', backgroundColor: 'rgba(16, 185, 129, 0.35)', color: '#a7f3d0', padding: '0.1rem 0.35rem', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.5)' }}>
-                                           עודכן
-                                         </span>
-                                       ) : (
-                                         <span>✏️</span>
-                                       )}
-                                     </span>
-                                   )}
+                                   ) : (() => {
+                                     const isSoldierActive = departmentsData.some(d => (d.departmentName || '').trim() === (s.department || '').trim() && (d.soldiers || []).some(ds => (ds.name || '').trim() === (s.name || '').trim()));
+                                     return (
+                                       <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.35rem', color: !isSoldierActive ? '#f87171' : (isSlotEdited ? '#34d399' : 'var(--text-primary)'), fontWeight: isSlotEdited || !isSoldierActive ? 600 : 'normal', flexWrap: 'wrap' }}>
+                                         {s.name} <span style={{ fontSize: '0.75rem', opacity: isSlotEdited ? 0.9 : 0.6 }}>({s.department})</span>
+                                         {!isSoldierActive && (
+                                           <span style={{ fontSize: '0.65rem', backgroundColor: 'rgba(239, 68, 68, 0.25)', color: '#fca5a5', padding: '0.1rem 0.35rem', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.5)', fontWeight: 'bold' }}>
+                                             ⚠️ הוסר/ה מהמחלקה
+                                           </span>
+                                         )}
+                                         {isSlotEdited && isSoldierActive ? (
+                                           <span style={{ fontSize: '0.68rem', backgroundColor: 'rgba(16, 185, 129, 0.35)', color: '#a7f3d0', padding: '0.1rem 0.35rem', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.5)' }}>
+                                             עודכן
+                                           </span>
+                                         ) : (
+                                           isSoldierActive && <span>✏️</span>
+                                         )}
+                                       </span>
+                                     );
+                                   })()}
                                 </div>
                               );
                             })}
@@ -2202,18 +2416,26 @@ const ManagerScreen = () => {
                                          </option>
                                        )))}
                                      </select>
-                                   ) : (
-                                     <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.35rem', color: isSlotEdited ? '#34d399' : 'var(--text-primary)', fontWeight: isSlotEdited ? 600 : 'normal' }}>
-                                       {s.name} <span style={{ fontSize: '0.75rem', opacity: isSlotEdited ? 0.9 : 0.6 }}>({s.department})</span>
-                                       {isSlotEdited ? (
-                                         <span style={{ fontSize: '0.68rem', backgroundColor: 'rgba(16, 185, 129, 0.35)', color: '#a7f3d0', padding: '0.1rem 0.35rem', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.5)' }}>
-                                           עודכן
-                                         </span>
-                                       ) : (
-                                         <span>✏️</span>
-                                       )}
-                                     </span>
-                                   )}
+                                   ) : (() => {
+                                     const isSoldierActive = departmentsData.some(d => (d.departmentName || '').trim() === (s.department || '').trim() && (d.soldiers || []).some(ds => (ds.name || '').trim() === (s.name || '').trim()));
+                                     return (
+                                       <span style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.35rem', color: !isSoldierActive ? '#f87171' : (isSlotEdited ? '#34d399' : 'var(--text-primary)'), fontWeight: isSlotEdited || !isSoldierActive ? 600 : 'normal', flexWrap: 'wrap' }}>
+                                         {s.name} <span style={{ fontSize: '0.75rem', opacity: isSlotEdited ? 0.9 : 0.6 }}>({s.department})</span>
+                                         {!isSoldierActive && (
+                                           <span style={{ fontSize: '0.65rem', backgroundColor: 'rgba(239, 68, 68, 0.25)', color: '#fca5a5', padding: '0.1rem 0.35rem', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.5)', fontWeight: 'bold' }}>
+                                             ⚠️ הוסר/ה מהמחלקה
+                                           </span>
+                                         )}
+                                         {isSlotEdited && isSoldierActive ? (
+                                           <span style={{ fontSize: '0.68rem', backgroundColor: 'rgba(16, 185, 129, 0.35)', color: '#a7f3d0', padding: '0.1rem 0.35rem', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.5)' }}>
+                                             עודכן
+                                           </span>
+                                         ) : (
+                                           isSoldierActive && <span>✏️</span>
+                                         )}
+                                       </span>
+                                     );
+                                   })()}
                                 </div>
                               );
                             })}
@@ -2754,7 +2976,9 @@ const ManagerScreen = () => {
                       
                       const avg = Number(avgShiftsPerSoldier) || 0;
                       let loadBadge = { text: 'תקין', bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: 'rgba(59, 130, 246, 0.3)' };
-                      if (s.effectiveTotal < avg - 0.75) {
+                      if (s.isNew) {
+                        loadBadge = { text: '🛡️ שבוע חסד (מוגן)', bg: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: 'rgba(16, 185, 129, 0.35)' };
+                      } else if (s.effectiveTotal < avg - 0.75) {
                         loadBadge = { text: 'עומס קל', bg: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: 'rgba(16, 185, 129, 0.3)' };
                       } else if (s.effectiveTotal > avg + 0.75) {
                         loadBadge = { text: 'עמוס', bg: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: 'rgba(245, 158, 11, 0.3)' };
@@ -2762,7 +2986,14 @@ const ManagerScreen = () => {
 
                       return (
                         <tr key={s.key} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                          <td style={{ padding: '0.65rem 0.5rem', fontWeight: 600 }}>{s.name}</td>
+                          <td style={{ padding: '0.65rem 0.5rem', fontWeight: 600 }}>
+                            {s.name}
+                            {s.isNew && (
+                              <span style={{ fontSize: '0.72rem', color: '#10B981', marginRight: '0.35rem', fontWeight: 600 }}>
+                                (חסד)
+                              </span>
+                            )}
+                          </td>
                           <td style={{ padding: '0.65rem 0.5rem' }}>
                             <span style={{ color: depColor, fontWeight: 500 }}>{s.department}</span>
                           </td>

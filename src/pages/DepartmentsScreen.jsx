@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Users, Plus, Save, UserCheck, ShieldAlert, Sun, Moon } from 'lucide-react';
+import { Users, Plus, Save, UserCheck, ShieldAlert, Sun, Moon, CheckCircle2 } from 'lucide-react';
 import { db } from '../firebase/firebase';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp, deleteField, updateDoc } from 'firebase/firestore';
 
 import { useLocation } from 'react-router-dom';
 
@@ -17,11 +17,13 @@ const DepartmentsScreen = () => {
   const [soldiers, setSoldiers] = useState([{ name: '', isNewSoldier: false, closesWeekend: false, exceptionType: 'none', exceptionReason: '', shiftPreference: 'none', blockedDays: [], constraintReason: '', spreadPreference: 'none', shiftTypePreference: 'none', preferredBuddy: '' }]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [isDirty, setIsDirty] = useState(false);
 
   React.useEffect(() => {
     const fetchDep = async () => {
       if (selectedDepartment) {
         setLoading(true);
+        setIsDirty(false);
         try {
           const docRef = doc(db, 'activeDepartments', selectedDepartment);
           const docSnap = await getDoc(docRef);
@@ -46,16 +48,19 @@ const DepartmentsScreen = () => {
   }, [selectedDepartment]);
 
   const handleAddSoldier = () => {
+    setIsDirty(true);
     setSoldiers([...soldiers, { name: '', isNewSoldier: false, closesWeekend: false, exceptionType: 'none', exceptionReason: '', shiftPreference: 'none', blockedDays: [], constraintReason: '', spreadPreference: 'none', shiftTypePreference: 'none', preferredBuddy: '' }]);
   };
 
   const handleSoldierChange = (index, field, value) => {
+    setIsDirty(true);
     const newSoldiers = [...soldiers];
     newSoldiers[index][field] = value;
     setSoldiers(newSoldiers);
   };
 
   const toggleBlockedDay = (index, day) => {
+    setIsDirty(true);
     const newSoldiers = [...soldiers];
     const currentDays = newSoldiers[index].blockedDays || [];
     if (currentDays.includes(day)) {
@@ -66,23 +71,14 @@ const DepartmentsScreen = () => {
     setSoldiers(newSoldiers);
   };
 
-  const handleRemoveSoldier = (index) => {
-    const newSoldiers = soldiers.filter((_, i) => i !== index);
-    setSoldiers(newSoldiers);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!selectedDepartment) {
-      setMessage('שגיאה: לא נבחרה מחלקה. בחר מחלקה תחילה.');
-      return;
-    }
+  const saveDepartmentData = async (soldiersToSave, removedSoldierNames = []) => {
+    if (!selectedDepartment) return false;
 
     // סינון שורות ריקות, ניקוי רווחים מיותרים ומניעת כפילויות של אותו חייל
     const seenNames = new Set();
     const validSoldiers = [];
     
-    soldiers.forEach(s => {
+    soldiersToSave.forEach(s => {
       const trimmedName = (s.name || '').trim();
       if (trimmedName !== '' && !seenNames.has(trimmedName)) {
         seenNames.add(trimmedName);
@@ -95,29 +91,144 @@ const DepartmentsScreen = () => {
         });
       }
     });
-    
-    if (validSoldiers.length === 0) {
-      setMessage('נא להזין לפחות חייל אחד.');
-      return;
-    }
 
     setLoading(true);
     setMessage('');
 
     try {
-      await setDoc(doc(db, 'activeDepartments', selectedDepartment), {
+      const depRef = doc(db, 'activeDepartments', selectedDepartment);
+      
+      // מציאת חיילים שהוסרו (אם לא הועברו מפורשות)
+      let allRemoved = [...removedSoldierNames];
+      try {
+        const prevSnap = await getDoc(depRef);
+        if (prevSnap.exists()) {
+          const prevSoldiers = prevSnap.data()?.soldiers || [];
+          prevSoldiers.forEach(ps => {
+            const psName = (ps.name || '').trim();
+            if (psName && !seenNames.has(psName) && !allRemoved.includes(psName)) {
+              allRemoved.push(psName);
+            }
+          });
+        }
+      } catch (e) {
+        console.error("Error checking previous soldiers:", e);
+      }
+
+      await setDoc(depRef, {
         departmentName: selectedDepartment.trim(),
         soldiers: validSoldiers,
         updatedAt: serverTimestamp()
       });
+
+      // עדכון אוטומטי של מספר תורנויות ממוצע לחייל שנוסף, ומחיקת חיילים שהוסרו מההיסטוריה
+      try {
+        const historyRef = doc(db, 'history', 'stats');
+        const historySnap = await getDoc(historyRef);
+        const globalStats = historySnap.exists() ? { ...historySnap.data() } : {};
+        
+        let vetTotalSum = 0;
+        let vetMidSum = 0;
+        let vetWeekSum = 0;
+        let vetCount = 0;
+        Object.entries(globalStats).forEach(([k, val]) => {
+          const tot = Number(val.total || 0);
+          if (tot > 0) {
+            vetTotalSum += tot;
+            vetMidSum += Number(val.midweek || 0);
+            vetWeekSum += Number(val.weekend || 0);
+            vetCount++;
+          }
+        });
+        const avgTotal = vetCount > 0 ? Math.floor(vetTotalSum / vetCount) : 5;
+        const avgWeek = vetCount > 0 ? Math.round(vetWeekSum / vetCount) : 1;
+        const avgMid = Math.max(0, avgTotal - avgWeek);
+
+        let statsModified = false;
+        
+        // 1. הסרת חיילים שנמחקו מהמחלקה מ-history/stats
+        allRemoved.forEach(remName => {
+          const remKey = `${remName.trim()}_${selectedDepartment.trim()}`;
+          if (globalStats[remKey] !== undefined) {
+            delete globalStats[remKey];
+            statsModified = true;
+          }
+        });
+
+        // 2. הוספת ממוצע לחיילים חדשים ללא שבוע חסד
+        validSoldiers.forEach(s => {
+          if (s.isNewSoldier) return;
+
+          const key = `${s.name}_${selectedDepartment.trim()}`;
+          const existing = globalStats[key];
+          const hasHistory = existing && (Number(existing.total || 0) > 0 || Number(existing.kesherDays || 0) > 0);
+
+          if (!hasHistory) {
+            globalStats[key] = {
+              total: avgTotal,
+              midweek: avgMid,
+              weekend: avgWeek,
+              kesherDays: Number(existing?.kesherDays || 0)
+            };
+            statsModified = true;
+          }
+        });
+
+        if (statsModified) {
+          await setDoc(historyRef, globalStats);
+        }
+      } catch (statsErr) {
+        console.error("Error syncing soldier baseline stats in history:", statsErr);
+      }
       
-      setMessage('הנתונים לשבוע הקרוב נשמרו בהצלחה!');
+      setIsDirty(false);
+      setMessage('הנתונים עודכנו ונשמרו בהצלחה למערכת ולטבלת הצדק!');
+      return true;
     } catch (error) {
-      console.error("Error adding document: ", error);
-      setMessage('שגיאה בשמירת הנתונים.');
+      console.error("Error saving department document: ", error);
+      setMessage('שגיאה בשמירת הנתונים: ' + error.message);
+      return false;
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRemoveSoldier = async (index) => {
+    const soldierToRemove = soldiers[index];
+    const sName = (soldierToRemove?.name || '').trim();
+
+    if (sName) {
+      if (!window.confirm(`האם אתה בטוח שברצונך למחוק את החייל/ת "${sName}" ממחלקת ${selectedDepartment}?\n\nהמחיקה תעדכן את המערכת וטבלת הצדק מיידית.`)) {
+        return;
+      }
+    }
+
+    const newSoldiers = soldiers.filter((_, i) => i !== index);
+    const finalSoldiers = newSoldiers.length > 0 ? newSoldiers : [{ name: '', isNewSoldier: false, closesWeekend: false, exceptionType: 'none', exceptionReason: '', shiftPreference: 'none', blockedDays: [], constraintReason: '', spreadPreference: 'none', shiftTypePreference: 'none', preferredBuddy: '' }];
+    setSoldiers(finalSoldiers);
+
+    // אם לחייל היה שם - מבצעים שמירה וסנכרון מיידי ל-Firestore
+    if (sName && selectedDepartment) {
+      await saveDepartmentData(finalSoldiers, [sName]);
+    } else {
+      setIsDirty(true);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e?.preventDefault();
+    if (!selectedDepartment) {
+      setMessage('שגיאה: לא נבחרה מחלקה. בחר מחלקה תחילה.');
+      return;
+    }
+
+    const hasAnySoldier = soldiers.some(s => (s.name || '').trim() !== '');
+    if (!hasAnySoldier) {
+      setMessage('נא להזין לפחות חייל אחד עם שם במחלקה.');
+      return;
+    }
+
+    await saveDepartmentData(soldiers);
   };
 
   if (!selectedDepartment) {
@@ -165,16 +276,63 @@ const DepartmentsScreen = () => {
       <h3 style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '1.5rem' }}>
         <Users color="var(--primary-color)" /> ניהול מצבת כוח אדם
       </h3>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-        <h4 style={{ color: 'var(--secondary-color)', margin: 0, fontSize: '1.2rem' }}>משתמש: סמל {selectedDepartment}</h4>
-        <button 
-          type="button" 
-          onClick={() => setSelectedDepartment('')} 
-          className="btn btn-secondary" 
-          style={{ padding: '0.35rem 0.8rem', fontSize: '0.85rem' }}
-        >
-          החלף מחלקה
-        </button>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: '1.25rem', 
+        flexWrap: 'wrap', 
+        gap: '0.75rem',
+        padding: '0.75rem 1rem',
+        backgroundColor: 'rgba(255,255,255,0.03)',
+        borderRadius: '8px',
+        border: '1px solid var(--border-color)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <h4 style={{ color: 'var(--secondary-color)', margin: 0, fontSize: '1.2rem' }}>משתמש: סמל {selectedDepartment}</h4>
+          {isDirty ? (
+            <span style={{ fontSize: '0.8rem', padding: '0.2rem 0.55rem', borderRadius: '12px', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.35)', fontWeight: 600 }}>
+              🟡 יש שינויים שטרם נשמרו
+            </span>
+          ) : (
+            <span style={{ fontSize: '0.8rem', padding: '0.2rem 0.55rem', borderRadius: '12px', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.35)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+              <CheckCircle2 size={13} /> כל הנתונים מסונכרנים
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <button
+            type="button"
+            onClick={() => handleSubmit()}
+            disabled={loading}
+            className="btn btn-primary"
+            style={{ 
+              padding: '0.45rem 1rem', 
+              fontSize: '0.9rem', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '0.4rem',
+              backgroundColor: isDirty ? 'var(--primary-color)' : 'rgba(99, 102, 241, 0.7)',
+              boxShadow: isDirty ? '0 0 12px rgba(99, 102, 241, 0.4)' : 'none'
+            }}
+          >
+            <Save size={16} />
+            {loading ? 'שומר...' : 'שמור נתוני מחלקה'}
+          </button>
+          
+          <button 
+            type="button" 
+            onClick={() => {
+              if (isDirty && !window.confirm('ישנם שינויים שטרם נשמרו. האם לצאת בכל זאת?')) return;
+              setSelectedDepartment('');
+            }} 
+            className="btn btn-secondary" 
+            style={{ padding: '0.45rem 0.8rem', fontSize: '0.85rem' }}
+          >
+            החלף מחלקה
+          </button>
+        </div>
       </div>
       
       <form onSubmit={handleSubmit}>
@@ -190,7 +348,7 @@ const DepartmentsScreen = () => {
           </div>
           
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
-            הזן את כל חיילי המחלקה. למי שסוגר שבת - סמן V. למי שיש פטור מתורנות - רשום את הסיבה.
+            הזן את כל חיילי המחלקה. מחיקת חייל מסנכרנת ומסירה אותו מיידית מטבלת הצדק.
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -212,7 +370,7 @@ const DepartmentsScreen = () => {
                   onClick={() => handleRemoveSoldier(index)}
                   className="btn btn-secondary"
                   style={{ position: 'absolute', top: '0.5rem', left: '0.5rem', padding: '0.5rem', borderColor: 'transparent', color: 'var(--danger-color)', backgroundColor: 'transparent' }}
-                  title="הסר חייל"
+                  title="הסר חייל מהמחלקה ומטבלת הצדק"
                 >
                   X
                 </button>
@@ -246,7 +404,6 @@ const DepartmentsScreen = () => {
                     value={soldier.name}
                     onChange={(e) => handleSoldierChange(index, 'name', e.target.value)}
                     style={{ marginBottom: 0, flex: '1 1 calc(100% - 60px)', minWidth: '100px' }}
-                    required
                   />
                   
                   <div style={{ display: 'flex', width: '100%', gap: '1rem', flexWrap: 'wrap' }}>
@@ -267,7 +424,9 @@ const DepartmentsScreen = () => {
                         onChange={(e) => handleSoldierChange(index, 'isNewSoldier', e.target.checked)}
                         style={{ width: '18px', height: '18px', accentColor: '#10B981' }}
                       />
-                      חייל חדש? (שבוע חסד)
+                      <span title="חייל חדש מקבל שבוע חסד ללא תורנויות. עם החלפת השבוע ויצירת שבצ״ק חדש, שבוע החסד יוסר אוטומטית והחייל יקבל את ממוצע התורנויות בטבלת הצדק למניעת טחינה.">
+                        חייל חדש? (שבוע חסד)
+                      </span>
                     </label>
                   </div>
                 </div>

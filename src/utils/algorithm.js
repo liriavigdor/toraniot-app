@@ -46,11 +46,42 @@ export const kesherDaysToKitchenShifts = (days) => {
   return fullTriplets * 2 + (remainder * 0.5);
 };
 
+export const isFullDayOnlyDept = (dept) => (dept === 'תקשוב' || dept === 'טנ"א' || dept === 'טנא' || dept === 'משא"ן' || dept === 'משאן');
+
 const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides = {}, kitchenOverrides = {}, historyData = {}, seed = 0) => {
   let eligibleSoldiers = [];
   let totalExemptions = 0;
   
   const EXPECTED_DEPARTMENTS = ['תקשוב', 'לוגיסטיקה', 'טנ"א', 'משא"ן'];
+
+  // חישוב ממוצע תורנויות של חיילי היחידה הוותיקים (למניעת טחינת חיילים חדשים - למשל ירון ועמית)
+  let veteranTotalSum = 0;
+  let veteranMidSum = 0;
+  let veteranWeekSum = 0;
+  let veteranCount = 0;
+
+  departmentsData.filter(dep => EXPECTED_DEPARTMENTS.includes(dep.departmentName)).forEach(dep => {
+    dep.soldiers?.forEach(s => {
+      if (s.isNewSoldier || s.exceptionType === 'full') return;
+      const sName = (s.name || '').trim();
+      const depName = (dep.departmentName || '').trim();
+      const hist = historyData[`${sName}_${depName}`] || historyData[`${s.name}_${dep.departmentName}`];
+      if (hist && ((hist.total || 0) > 0 || (hist.effectiveTotal || 0) > 0 || (hist.kesherDays || 0) > 0)) {
+        const kEquiv = kesherDaysToKitchenShifts(hist.kesherDays || 0);
+        const effTotal = hist.effectiveTotal !== undefined ? hist.effectiveTotal : ((hist.total || 0) + kEquiv);
+        const effMid = hist.effectiveMidweek !== undefined ? hist.effectiveMidweek : ((hist.midweek || 0) + kEquiv);
+        veteranTotalSum += effTotal;
+        veteranMidSum += effMid;
+        veteranWeekSum += (hist.weekend || 0);
+        veteranCount++;
+      }
+    });
+  });
+
+  const avgCompanyTotal = veteranCount > 0 ? Math.floor(veteranTotalSum / veteranCount) : 5;
+  const avgCompanyWeek = veteranCount > 0 ? Math.round(veteranWeekSum / veteranCount) : 1;
+  const avgCompanyMid = Math.max(0, avgCompanyTotal - avgCompanyWeek);
+
   departmentsData.filter(dep => EXPECTED_DEPARTMENTS.includes(dep.departmentName)).forEach(dep => {
     dep.soldiers?.forEach((s, idx) => {
       const id = `${dep.departmentName}_${idx}`;
@@ -65,7 +96,9 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
       const sName = (s.name || '').trim();
       const depName = (dep.departmentName || '').trim();
       const soldierKey = `${sName}_${depName}`;
-      const history = historyData[soldierKey] || historyData[`${s.name}_${dep.departmentName}`] || { total: 0, weekend: 0, midweek: 0, kesherDays: 0 };
+      const hasHistory = historyData[soldierKey] || historyData[`${s.name}_${dep.departmentName}`];
+      const hasRecorded = hasHistory && ((hasHistory.total || 0) > 0 || (hasHistory.kesherDays || 0) > 0);
+      const history = hasHistory || { total: 0, weekend: 0, midweek: 0, kesherDays: 0 };
 
       const kesherDays = history.kesherDays || 0;
       const kesherEquiv = kesherDaysToKitchenShifts(kesherDays);
@@ -73,11 +106,11 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
       let virtMid = (history.effectiveMidweek !== undefined ? history.effectiveMidweek : (history.midweek || 0) + kesherEquiv);
       let virtWeek = history.weekend || 0;
       
-      if (s.isNewSoldier) {
-        // "שבוע חסד" - לחייל חדש יוגדר כאילו ביצע משמרת 1 כדי שלא יידפק מול הותיקים שצברו 0 משמרות
-        virtTotal = Math.max(virtTotal, 1);
-        virtMid = Math.max(virtMid, 1);
-        virtWeek = Math.max(virtWeek, 1);
+      // כל חייל שמתווסף ואין לו תורנויות קודמות - מתחיל מממוצע היחידה למניעת שחיקה
+      if (!hasRecorded) {
+        virtTotal = Math.max(virtTotal, avgCompanyTotal);
+        virtMid = Math.max(virtMid, avgCompanyMid);
+        virtWeek = Math.max(virtWeek, avgCompanyWeek);
       }
 
       if (activeExceptionType === 'full') {
@@ -101,7 +134,8 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
           totalShifts: virtTotal,
           kesherDays: kesherDays,
           lastDayAssigned: -99,
-          assignedDays: []
+          assignedDays: [],
+          isNewSoldier: s.isNewSoldier === true || s.isNewSoldier === 'true'
         });
       }
     });
@@ -113,26 +147,62 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
   const reqMid = parseInt(kitchenData.midweek?.plasam || 0);
   const reqWeek = parseInt(kitchenData.weekend?.plasam || 0);
 
+  const SCHEDULE_DAYS = [
+    { key: "א'", name: 'ראשון', short: "א'", isWeekend: false, dayOffset: 0 },
+    { key: "ב'", name: 'שני', short: "ב'", isWeekend: false, dayOffset: 1 },
+    { key: "ג'", name: 'שלישי', short: "ג'", isWeekend: false, dayOffset: 2 },
+    { key: "ד'", name: 'רביעי', short: "ד'", isWeekend: false, dayOffset: 3 },
+    { key: "ה'", name: 'חמישי', short: "ה'", isWeekend: false, dayOffset: 4 },
+    { key: "ו'", name: 'שישי', short: "ו'", isWeekend: true, dayOffset: 5 },
+    { key: "ש'", name: 'שבת', short: "ש'", isWeekend: true, dayOffset: 6 },
+    { key: "א' (יציאה)", name: 'ראשון', short: "א'", isWeekend: true, dayOffset: 7 } 
+  ];
+
+  const selectedDaysMap = kitchenData.activeDays || {};
+
+  const getReq = (dayInfo, isMorning) => {
+    const shiftStr = isMorning ? 'morning' : 'evening';
+    const override = kitchenOverrides[`${dayInfo.key}_${shiftStr}_plasam`];
+    if (override !== undefined && override !== '') return parseInt(override);
+    const defReq = dayInfo.isWeekend ? reqWeek : reqMid;
+    return parseInt(defReq || 0);
+  };
+
+  const hasBothShifts = (dayInfo) => {
+    const dayState = selectedDaysMap[dayInfo.key];
+    if (dayState !== 'full') return false;
+    if (dayInfo.key === "ש'" || dayInfo.key === "ו'") {
+      return getReq(dayInfo, true) > 0;
+    }
+    return getReq(dayInfo, true) > 0 && getReq(dayInfo, false) > 0;
+  };
+
   const dayConflictsBuffer = [];
 
   const pickSoldiers = (dayIndex, dayInfo, isMorning, requiredCount) => {
     if (requiredCount === 0) return [];
     
+    // הגדרת "משמרת סופ״ש": כל יום שמוגדר סופ״ש, וגם יום חמישי במלואו (בוקר וערב) - מי שלא סוגר שבת אסור לשבץ!
+    const isThursday = dayInfo.key === "ה'" || dayInfo.short === "ה'" || dayInfo.name === 'חמישי';
+    const isWeekendShift = dayInfo.isWeekend || isThursday;
+
     const picked = [];
     
     while (picked.length < requiredCount) {
       let candidates = eligibleSoldiers.filter(s => {
-        
-        // הגדרת "משמרת סופ״ש" לצורך סינון: כל יום שמוגדר סופ״ש, וגם יום חמישי במלואו (בוקר וערב) - מי שלא סוגר שבת אסור לשבץ!
-        const isThursday = dayInfo.key === "ה'" || dayInfo.short === "ה'" || dayInfo.name === 'חמישי';
-        const isWeekendShift = dayInfo.isWeekend || isThursday;
+        // חוק שבוע חסד: חייל חדש הנמצא בשבוע חסד פטור לחלוטין משיבוץ לתורנויות בשבוע הקליטה
+        if (s.isNewSoldier) return false;
+
         if (isWeekendShift && (!s.closesWeekend || s.isWeekendExempt)) return false;
         
         if (s.blockedDays.includes(dayInfo.short)) return false; // only hard blocked
         if (picked.some(p => p.id === s.id)) return false; // already picked in this shift
         
         // חוק 1: עד 4 מטבחים באמצע שבוע (א'-ד') למניעת שחיקה מוגזמת
-        if (!isWeekendShift && (s.thisWeekMidweekCount || 0) >= 4) return false;
+        if (!isWeekendShift && (s.thisWeekMidweekCount || 0) >= 4) {
+          // אם החייל שובץ כבר הבוקר (באותו יום), הוא משלים יום שלם ולא נחסם
+          if (!s.assignedDays.includes(dayIndex)) return false;
+        }
 
         // חוק 2: מחלקת לוגיסטיקה יכולה להעלות רק חייל 1 ביום (בוקר וערב יחד)
         if (s.department === 'לוגיסטיקה') {
@@ -154,6 +224,24 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
           if (would3Consecutive) return false;
         }
 
+        // חוק חדש: מחלקות תקשוב וטנ״א - ימים שלמים בלבד! (ללא חצאי ימים)
+        if (isFullDayOnlyDept(s.department)) {
+          // א. אסור לשבץ ביום שאינו יום מלא עם בוקר וערב (למעט יציאת שבת של סוגרי השבוע)
+          if (dayInfo.key !== "א' (יציאה)" && !hasBothShifts(dayInfo)) return false;
+
+          if (dayInfo.key !== "ש'" && dayInfo.key !== "ו'" && dayInfo.key !== "א' (יציאה)") {
+            if (isMorning) {
+              // בבוקר: לא לשבץ יותר חיילי תקשוב/טנ"א ממספר המקומות שיהיו פנויים עבורם בערב
+              const fullDeptPickedInMorning = picked.filter(p => isFullDayOnlyDept(p.department)).length;
+              const eReq = getReq(dayInfo, false);
+              if (fullDeptPickedInMorning >= eReq) return false;
+            } else {
+              // בערב: רשאים לעלות אך ורק חיילים ששובצו כבר הבוקר באותו יום!
+              if (!s.assignedDays.includes(dayIndex)) return false;
+            }
+          }
+        }
+
         return true;
       });
       
@@ -161,8 +249,22 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
         if (!isWeekendShift) {
           // במקרה קיצון של מחסור חריג בחיילים פנויים, מאפשרים חריגה מבוקרת כפתרון חירום
           candidates = eligibleSoldiers.filter(s => {
+            if (s.isNewSoldier) return false;
             if (s.blockedDays.includes(dayInfo.short)) return false;
             if (picked.some(p => p.id === s.id)) return false;
+            // גם בחירום שומרים באופן מוחלט על חוק יום שלם לתקשוב וטנ״א
+            if (isFullDayOnlyDept(s.department)) {
+              if (dayInfo.key !== "א' (יציאה)" && !hasBothShifts(dayInfo)) return false;
+              if (dayInfo.key !== "ש'" && dayInfo.key !== "ו'" && dayInfo.key !== "א' (יציאה)") {
+                if (isMorning) {
+                  const fullDeptPickedInMorning = picked.filter(p => isFullDayOnlyDept(p.department)).length;
+                  const eReq = getReq(dayInfo, false);
+                  if (fullDeptPickedInMorning >= eReq) return false;
+                } else {
+                  if (!s.assignedDays.includes(dayIndex)) return false;
+                }
+              }
+            }
             return true;
           });
         }
@@ -174,6 +276,12 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
       // תעדוף יום שלם: לא מסננים מועמדים שכבר שובצו היום, כדי לאפשר שיבוץ יום שלם ולמנוע פיזור על פני ימים מרובים
       
       candidates.sort((a, b) => {
+        // -1. עדיפות עליונה מוחלטת: חיילי תקשוב וטנ״א ששובצו הבוקר חייבים להשלים את משמרת הערב!
+        if (!isMorning && (dayInfo.key !== "ש'" && dayInfo.key !== "ו'")) {
+          const aMustFull = isFullDayOnlyDept(a.department) && a.assignedDays.includes(dayIndex) ? 1 : 0;
+          const bMustFull = isFullDayOnlyDept(b.department) && b.assignedDays.includes(dayIndex) ? 1 : 0;
+          if (aMustFull !== bMustFull) return bMustFull - aMustFull;
+        }
 
         // 0.0. עדיפות עליונה: מניעת יומיים ברצף (אתמול או מחר) - לבקשת המפקד
         const aConsec = ((a.assignedDays.includes(dayIndex - 1) || a.assignedDays.includes(dayIndex + 1)) && a.spreadPreference !== 'consecutive') ? 1 : 0;
@@ -335,19 +443,6 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
     return picked;
   };
 
-  const SCHEDULE_DAYS = [
-    { key: "א'", name: 'ראשון', short: "א'", isWeekend: false, dayOffset: 0 },
-    { key: "ב'", name: 'שני', short: "ב'", isWeekend: false, dayOffset: 1 },
-    { key: "ג'", name: 'שלישי', short: "ג'", isWeekend: false, dayOffset: 2 },
-    { key: "ד'", name: 'רביעי', short: "ד'", isWeekend: false, dayOffset: 3 },
-    { key: "ה'", name: 'חמישי', short: "ה'", isWeekend: false, dayOffset: 4 },
-    { key: "ו'", name: 'שישי', short: "ו'", isWeekend: true, dayOffset: 5 },
-    { key: "ש'", name: 'שבת', short: "ש'", isWeekend: true, dayOffset: 6 },
-    { key: "א' (יציאה)", name: 'ראשון', short: "א'", isWeekend: true, dayOffset: 7 } 
-  ];
-
-  const selectedDaysMap = kitchenData.activeDays || {};
-  
   const activeDaysToSchedule = SCHEDULE_DAYS.filter(d => {
     return selectedDaysMap[d.key] && selectedDaysMap[d.key] !== 'off';
   });
@@ -357,15 +452,6 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
   activeDaysToSchedule.forEach((day) => {
     const dayIndex = SCHEDULE_DAYS.findIndex(d => d.key === day.key);
     const dayState = selectedDaysMap[day.key];
-    const isW = day.isWeekend;
-    
-    const getReq = (dayInfo, isMorning) => {
-      const shiftStr = isMorning ? 'morning' : 'evening';
-      const override = kitchenOverrides[`${dayInfo.key}_${shiftStr}_plasam`];
-      if (override !== undefined && override !== '') return parseInt(override);
-      const defReq = isW ? reqWeek : reqMid;
-      return parseInt(defReq || 0);
-    };
 
     if (dayState === 'full' || dayState === 'half_morning') {
       shiftsToSchedule.push({ dayIndex, day, isMorning: true, req: getReq(day, true) });
@@ -388,6 +474,7 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
         const isWeekendShift = shift.day.isWeekend || isThursday;
         if (isWeekendShift && (!s.closesWeekend || s.isWeekendExempt)) return false;
         
+        if (s.isNewSoldier) return false;
         if (s.blockedDays.includes(shift.day.short)) return false;
         if (!isWeekendShift && (s.thisWeekMidweekCount || 0) >= 4) return false;
         return true;
@@ -417,6 +504,16 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
     const picked = pickSoldiers(shift.dayIndex, shift.day, shift.isMorning, shift.req);
     const key = `${shift.day.key}_${shift.isMorning ? 'morning' : 'evening'}`;
     scheduleResultMap[key] = picked;
+
+    // אם הרגע שיבצנו משמרת בוקר, ויש לאותו יום משמרת ערב ברשימה - נשבץ מיד את הערב כדי להבטיח רציפות והשלמת יום שלם!
+    if (shift.isMorning) {
+      const eveningIndex = shiftsToSchedule.findIndex(s => s.dayIndex === shift.dayIndex && !s.isMorning);
+      if (eveningIndex !== -1) {
+        const eveningShift = shiftsToSchedule.splice(eveningIndex, 1)[0];
+        const eveningPicked = pickSoldiers(eveningShift.dayIndex, eveningShift.day, false, eveningShift.req);
+        scheduleResultMap[`${eveningShift.day.key}_evening`] = eveningPicked;
+      }
+    }
   }
 
   activeDaysToSchedule.forEach((day) => {
@@ -443,7 +540,14 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
         const pE_req = getReq(day, false);
         const pM = scheduleResultMap[`${day.key}_morning`] || [];
         
-        eveningShift = pM.slice(0, pE_req);
+        // מוודאים שכל חייל מתקשוב או טנ"א נמצא בראש הרשימה כדי שישובץ לערב וישלים יום שלם
+        const sortedPM = [...pM].sort((a, b) => {
+          const aFull = isFullDayOnlyDept(a.department) ? 1 : 0;
+          const bFull = isFullDayOnlyDept(b.department) ? 1 : 0;
+          return bFull - aFull;
+        });
+
+        eveningShift = sortedPM.slice(0, pE_req);
 
         // יצירת קונפליקטים במידה ויש חוסר
         if (eveningShift.length < pE_req) {
@@ -509,12 +613,14 @@ const generateSingleSchedule = (kitchenData, departmentsData, managerOverrides =
     schedule,
     soldiersState: eligibleSoldiers,
     considerations: [
+      "✓ חוק מחלקות תקשוב, טנ״א ומשא״ן (ימים שלמים בלבד): חיילים/ות ממחלקות אלו משובצים לימים שלמים בלבד (בוקר וערב יחד באותו יום), ללא חצאי ימים וללא פיצולים.",
       "✓ שוויון במסגרות הסופ״ש והאמצ״ש כערך עליון (נלמד מפידבק): המערכת שמה את ההגינות והשוויון בכמות המשמרות (בתוך אותה מסגרת - סופ״ש או אמצ״ש) בראש סדר העדיפויות, אפילו לפני הניסיון למנוע משמרות יום אחרי יום. זאת כדי להבטיח שאף אחד לא נשאר ריק בזמן שאחרים טוחנים.",
       "✓ חוק מחלקת לוגיסטיקה (עד חייל 1 ביום): לבקשת המפקד, מחלקת לוגיסטיקה לא תעלה יותר מחייל אחד ביום (בוקר וערב יחד), כדי לשמור על רציפות תפקודית של המחלקה.",
       "✓ מניעה מוחלטת של ימים ברצף ותעדוף יום שלם: האלגוריתם מונע לחלוטין 3 ימים ברצף, נמנע מיומיים ברצף, ומתעדף שיבוץ חיילים ליום שלם (בוקר וערב באותו יום) כדי שיסיימו את תורנותם ביום אחד מרוכז ולא ייגררו על פני ימים עוקבים.",
       "✓ הגבלת עומס שבועי (עד 4 מטבחים באמצ״ש): חוק ברזל במערכת – אף חייל לא יעלה יותר מ-4 משמרות מטבח באמצע השבוע (א׳-ד׳), כדי למנוע שחיקה חריגה של חיילים חדשים או בעלי מעט משמרות היסטוריות.",
       "✓ שקלול שהייה באתר קשר: כל 1.5 ימים באתר קשר נספרים כשווה ערך למשמרת מטבח (אם יש יום עודף שלא מתחלק, הוא נספר כחצי משמרת מטבח, למשל 4 ימים = 2.5 משמרות). חיילים ששירתו באתר קשר מקבלים עדיפות למנוחה ואינם משובצים לפני חיילים שטרם ביצעו תורנויות.",
       "✓ נעילת יום חמישי לסוגרי שבת בלבד: יום חמישי מוגדר כחלק מסוף השבוע (התחלת הסגירה). חייל המסומן כ'לא סוגר' או בעל פטור סופ״ש חסום באופן מוחלט משיבוץ ביום חמישי (בוקר וערב).",
+      "✓ שבוע חסד לחיילים חדשים: חייל המסומן ב'שבוע חסד' מוגן לחלוטין משיבוץ לתורנויות בשבוע הקליטה שלו ביחידה. עם החלפת השבוע ויצירת שבצ״ק חדש, שבוע החסד מוסר אוטומטית והחייל מקבל את ממוצע התורנויות היחידתי בטבלת הצדק למניעת טחינה.",
       "✓ שוויון סך כל המשמרות: משמש כשובר שוויון סופי כדי להבטיח צדק כללי במבט מלמעלה.",
       "✓ פיזור מחלקתי ורוטציית שבת ממשיכים להישמר כרגיל כשיקולים משניים.",
       "✓ אופטימיזציה ובקרת איכות (QA): האלגוריתם בחן עשרות וריאציות אפשריות (במצבים של שובר שוויון) ובחר להגיש לך אך ורק את התוצאה עם הפערים הקטנים ביותר האפשריים בין החיילים!"
@@ -579,6 +685,23 @@ export const generateSchedule = (kitchenData, departmentsData, managerOverrides 
           if (logInDay.size > 1) {
             score += 20000;
           }
+        });
+
+        // עונש מוחלט על חריגה מחוק תקשוב, טנ"א ומשא"ן (חייבים לעשות יום שלם בלבד בכל יום שבו שובצו, למעט יציאת שבת)
+        result.schedule.forEach(day => {
+          if (day.shortName === "א' (יציאה)") return;
+          const mFullDepts = (day.morning || []).filter(s => isFullDayOnlyDept(s.department));
+          const eFullDepts = (day.evening || []).filter(s => isFullDayOnlyDept(s.department));
+          
+          const mNames = new Set(mFullDepts.map(s => s.name));
+          const eNames = new Set(eFullDepts.map(s => s.name));
+          
+          mNames.forEach(name => {
+            if (!eNames.has(name)) score += 100000;
+          });
+          eNames.forEach(name => {
+            if (!mNames.has(name)) score += 100000;
+          });
         });
         
         const weekendGap = maxWeekend - minWeekend;
