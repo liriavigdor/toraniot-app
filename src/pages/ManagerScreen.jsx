@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { ClipboardCheck, CheckCircle2, AlertCircle, ArrowDown, FileText, XCircle, Share2, ChevronDown, ChevronUp, BrainCircuit, MessageSquareText, FileCheck, Unlock, PenLine, CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2, Scale, Radio, Search, Filter, RotateCcw, AlertTriangle, GraduationCap } from 'lucide-react';
+import { ClipboardCheck, CheckCircle2, AlertCircle, ArrowDown, FileText, XCircle, Share2, ChevronDown, ChevronUp, BrainCircuit, MessageSquareText, FileCheck, Unlock, PenLine, CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2, Scale, Radio, Search, Filter, RotateCcw, AlertTriangle, GraduationCap, RefreshCw, UserPlus } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { db } from '../firebase/firebase';
 import { doc, collection, onSnapshot, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { generateSchedule, SchedulingConflictError, kesherDaysToKitchenShifts } from '../utils/algorithm';
 import { getDefaultSunday, formatDayDate, getWeekRangeStr, addDaysToDateStr } from '../utils/dateUtils';
+import { createEmptyScheduleFromKitchen, syncScheduleWithKitchenRequirements } from '../utils/scheduleUtils';
 
 // מחלקות שצריכות להגיש כדי שהמערכת תוכל לשבץ - נעדכן לפי הצורך
 const EXPECTED_DEPARTMENTS = ['תקשוב', 'לוגיסטיקה', 'טנ"א', 'משא"ן'];
@@ -95,7 +96,15 @@ const ManagerScreen = () => {
     // 1. האזנה בזמן אמת לדרישות המטבח השבועיות
     const unsubKitchen = onSnapshot(doc(db, 'activeWeek', 'kitchen'), (docSnap) => {
       if (docSnap.exists()) {
-        setKitchenData(docSnap.data());
+        const data = docSnap.data();
+        setKitchenData(data);
+        if (data.kitchenOverrides) {
+          setKitchenOverrides(prev => {
+            const merged = { ...prev, ...data.kitchenOverrides };
+            localStorage.setItem('toraniot_kitchenOverrides', JSON.stringify(merged));
+            return merged;
+          });
+        }
       } else {
         setKitchenData(null);
       }
@@ -209,8 +218,54 @@ const ManagerScreen = () => {
         [`${dayKey}_${shift}_${type}`]: val
       };
       localStorage.setItem('toraniot_kitchenOverrides', JSON.stringify(updated));
+      setDoc(doc(db, 'activeWeek', 'kitchen'), {
+        kitchenOverrides: updated
+      }, { merge: true }).catch(err => console.error("Error saving kitchen overrides:", err));
       return updated;
     });
+  };
+
+  // איפוס וריקון טבלת החיילים למשבצות ריקות לפי דרישות המטבח
+  const handleResetSoldierTableToEmpty = async () => {
+    if (!window.confirm("האם לאפס ולרוקן את טבלת החיילים?\n\nפעולה זו תרוקן את שמות החיילים ותציג משבצות ריקות פנויות למילוי, בדיוק לפי דרישות הטבחים המעודכנות.")) {
+      return;
+    }
+
+    try {
+      const emptySched = createEmptyScheduleFromKitchen(kitchenData, kitchenOverrides, weekStartDate);
+      await setDoc(doc(db, 'justiceTable', 'current'), {
+        schedule: emptySched,
+        startDate: weekStartDate,
+        timestamp: new Date().toISOString(),
+        isSigned: false,
+        signedAt: null,
+        signedBy: null,
+        weekContributions: null,
+        historyApplied: false,
+        weekTitle: justiceData?.weekTitle || 'שבוע פלס״ם'
+      });
+      alert("טבלת החיילים רוקנה בהצלחה ומוכנה למילוי עצמי של החיילים!");
+    } catch (err) {
+      console.error("Error resetting soldier table:", err);
+      alert("שגיאה בריקון טבלת החיילים: " + err.message);
+    }
+  };
+
+  // סנכרון מבנה המשבצות לדרישות טבחים (שמירה על חיילים שכבר שובצו)
+  const handleSyncKitchenRequirementsToSoldierTable = async () => {
+    try {
+      const syncedSched = syncScheduleWithKitchenRequirements(justiceData?.schedule, kitchenData, kitchenOverrides, weekStartDate);
+      await setDoc(doc(db, 'justiceTable', 'current'), {
+        ...(justiceData || {}),
+        schedule: syncedSched,
+        startDate: weekStartDate,
+        timestamp: new Date().toISOString()
+      });
+      alert("טבלת החיילים סונכרנה בהצלחה לפי דרישות המטבח המעודכנות!");
+    } catch (err) {
+      console.error("Error syncing soldier table:", err);
+      alert("שגיאה בסנכרון הטבלה: " + err.message);
+    }
   };
 
   const handleRunAlgorithm = () => {
@@ -662,34 +717,40 @@ const ManagerScreen = () => {
     }
   };
 
-  // איפוס וניקוי הטבלה השבועית בלבד (הכנה לשבוע חדש) - ללא פגיעה בטבלת הצדק
+  // איפוס וריקון הטבלה השבועית בלבד (הכנה לשבוע חדש למילוי חיילים) - ללא פגיעה בטבלת הצדק
   const handleClearCurrentScheduleOnly = async () => {
-    if (!justiceData) return;
-
-    if (!justiceData.isSigned) {
+    if (justiceData && !justiceData.isSigned) {
       const confirmUnsigned = window.confirm(
-        "⚠️ שים לב: השבצ״ק השבועי הנוכחי טרם נחתם!\n\nאם תאפס את הטבלה כעת, המשמרות שבוצעו השבוע לא יישמרו בטבלת הצדק.\n\nמומלץ לחתום קודם ('✍️ חתום ואשר – עדכן לטבלת הצדק').\n\nהאם לאפס ולנקות את הטבלה בכל זאת?"
+        "⚠️ שים לב: השבצ״ק השבועי הנוכחי טרם נחתם!\n\nאם תאפס את הטבלה כעת, המשמרות שבוצעו השבוע לא יישמרו בטבלת הצדק.\n\nמומלץ לחתום קודם ('✍️ חתום ואשר – עדכן לטבלת הצדק').\n\nהאם לאפס ולרוקן את טבלת החיילים למשבצות ריקות בכל זאת?"
       );
       if (!confirmUnsigned) return;
     } else {
       const confirmSigned = window.confirm(
-        "השבצ״ק הנוכחי כבר חתום וכל משמרותיו שמורות בבטחה בטבלת הצדק.\n\nפעולה זו תנקה את לוח שלב 5 בלבד ותכין אותו לשבוע חדש (ללא שום פגיעה בטבלת הצדק).\n\nהאם לנקות את הטבלה?"
+        "השבצ״ק הנוכחי כבר חתום וכל משמרותיו שמורות בבטחה בטבלת הצדק.\n\nפעולה זו תרוקן את לוח החיילים למשבצות ריקות לפי דרישות המטבח ותכין אותו לשבוע חדש למילוי עצמי של החיילים.\n\nהאם לרוקן את הטבלה?"
       );
       if (!confirmSigned) return;
     }
 
     try {
+      const emptySched = createEmptyScheduleFromKitchen(kitchenData, kitchenOverrides, weekStartDate);
       await setDoc(doc(db, 'justiceTable', 'current'), {
-        schedule: null,
-        startDate: null,
+        schedule: emptySched,
+        startDate: weekStartDate,
         timestamp: new Date().toISOString(),
         isSigned: false,
         signedAt: null,
         signedBy: null,
         weekContributions: null,
-        historyApplied: false
+        historyApplied: false,
+        weekTitle: justiceData?.weekTitle || 'שבוע פלס״ם'
       });
-      setJusticeData(null);
+      setJusticeData({
+        schedule: emptySched,
+        startDate: weekStartDate,
+        timestamp: new Date().toISOString(),
+        isSigned: false,
+        weekTitle: justiceData?.weekTitle || 'שבוע פלס״ם'
+      });
     } catch (err) {
       console.error("Error clearing current schedule:", err);
       alert("שגיאה בניקוי הטבלה: " + err.message);
@@ -718,11 +779,35 @@ const ManagerScreen = () => {
     }
   };
 
+  const handleClearSlotInJustice = async (dayIdx, shiftTime, idx) => {
+    if (!justiceData?.schedule) return;
+    const newSchedule = [...justiceData.schedule];
+    newSchedule[dayIdx][shiftTime][idx] = {
+      name: '',
+      department: '',
+      isSlotEmpty: true,
+      originalName: '',
+      originalDepartment: '',
+      isEdited: false
+    };
+    await setDoc(doc(db, 'justiceTable', 'current'), {
+      ...justiceData,
+      schedule: newSchedule
+    });
+    setEditingShift(null);
+  };
+
   const handleBaltamChange = async (dayIdx, shiftTime, idx, oldPerson, newPersonStr) => {
     if (!newPersonStr) {
       setEditingShift(null);
       return;
     }
+
+    if (newPersonStr === '__CLEAR__') {
+      await handleClearSlotInJustice(dayIdx, shiftTime, idx);
+      return;
+    }
+
     const [newName, newDep] = newPersonStr.split('_');
 
     const oldOrigName = oldPerson.originalName !== undefined ? oldPerson.originalName : oldPerson.name;
@@ -736,7 +821,8 @@ const ManagerScreen = () => {
         isAgam: newDep === 'אג"ם',
         originalName: oldOrigName,
         originalDepartment: oldOrigDep,
-        isEdited: isNowDifferent
+        isEdited: isNowDifferent,
+        isSlotEmpty: false
     };
 
     await setDoc(doc(db, 'justiceTable', 'current'), {
@@ -1146,15 +1232,23 @@ const ManagerScreen = () => {
       // ביטול חתימת/צבירת השבצ״ק הנוכחי שהוכנס בטעות
       if (justiceData) {
         if (resetScheduleAlso) {
+          const emptySched = createEmptyScheduleFromKitchen(kitchenData, kitchenOverrides, weekStartDate);
           await setDoc(doc(db, 'justiceTable', 'current'), {
-            schedule: null,
+            schedule: emptySched,
+            startDate: weekStartDate,
             isSigned: false,
             historyApplied: false,
             weekContributions: null,
             signedAt: null,
-            signedBy: null
+            signedBy: null,
+            weekTitle: justiceData?.weekTitle || 'שבוע פלס״ם'
           });
-          setJusticeData(null);
+          setJusticeData({
+            schedule: emptySched,
+            startDate: weekStartDate,
+            isSigned: false,
+            weekTitle: justiceData?.weekTitle || 'שבוע פלס״ם'
+          });
         } else {
           await setDoc(doc(db, 'justiceTable', 'current'), {
             ...justiceData,
@@ -1328,6 +1422,28 @@ const ManagerScreen = () => {
                     </table>
                   </div>
                 )}
+                
+                {/* כפתורי סנכרון ואיפוס מהירים ללוח החיילים בהתאם לדרישות המטבח */}
+                <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={handleSyncKitchenRequirementsToSoldierTable}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.88rem', padding: '0.5rem 1.1rem', display: 'flex', alignItems: 'center', gap: '0.45rem', borderColor: 'rgba(99, 102, 241, 0.4)', color: 'var(--primary-color)' }}
+                    title="התאם את משבצות לוח החיילים לדרישות המטבח המעודכנות"
+                  >
+                    <RefreshCw size={15} /> התאם טבלת חיילים לדרישות טבחים
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetSoldierTableToEmpty}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.88rem', padding: '0.5rem 1.1rem', display: 'flex', alignItems: 'center', gap: '0.45rem', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#f87171' }}
+                    title="איפוס וריקון טבלת החיילים למשבצות ריקות לפי דרישות טבחים"
+                  >
+                    <RotateCcw size={15} /> רוקן טבלה למילוי חיילים
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
@@ -2184,11 +2300,38 @@ const ManagerScreen = () => {
                 <strong>בסיום העריכה:</strong> לחץ על 'העבר לטבלת צדק בסיום העריכה' בתחתית הטבלה לעדכון וצבירת המשמרות בטבלת הצדק.
               </p>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', color: '#34d399', backgroundColor: 'rgba(16, 185, 129, 0.12)', padding: '0.3rem 0.8rem', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.35)', fontWeight: 500 }}>
-                  <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#10B981', display: 'inline-block' }}></span>
-                  משבצת ירוקה = תורן שעודכן או נוסף בעריכה (בלת״ם)
-                </span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', color: '#a5b4fc', backgroundColor: 'rgba(99, 102, 241, 0.12)', padding: '0.3rem 0.8rem', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.35)', fontWeight: 500 }}>
+                    <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#6366f1', display: 'inline-block' }}></span>
+                    משבצת מקווקוות = פנויה למילוי
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', color: '#34d399', backgroundColor: 'rgba(16, 185, 129, 0.12)', padding: '0.3rem 0.8rem', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.35)', fontWeight: 500 }}>
+                    <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#10B981', display: 'inline-block' }}></span>
+                    משבצת ירוקה = תורן ששובץ
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={handleSyncKitchenRequirementsToSoldierTable}
+                    className="btn btn-secondary"
+                    style={{ padding: '0.35rem 0.85rem', fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                    title="התאם את מבנה המשבצות לדרישות הטבחים המעודכנות"
+                  >
+                    <RefreshCw size={14} /> התאם לדרישות טבחים
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetSoldierTableToEmpty}
+                    className="btn btn-secondary"
+                    style={{ padding: '0.35rem 0.85rem', fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: '#f87171', borderColor: 'rgba(239,68,68,0.4)' }}
+                    title="איפוס וריקון טבלת החיילים למשבצות ריקות לפי דרישות טבחים"
+                  >
+                    <RotateCcw size={14} /> רוקן טבלה למילוי חיילים
+                  </button>
+                </div>
               </div>
 
               <div style={{ overflowX: 'auto', backgroundColor: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '8px' }}>
@@ -2240,6 +2383,62 @@ const ManagerScreen = () => {
                             )}
 
                             {(day.morning || []).map((s, idx) => {
+                              const isEmpty = !s.name || s.isSlotEmpty;
+                              if (isEmpty) {
+                                return (
+                                  <div
+                                    key={idx}
+                                    style={{
+                                      padding: '0.45rem',
+                                      borderBottom: idx < day.morning.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+                                      cursor: 'pointer',
+                                      backgroundColor: 'rgba(99, 102, 241, 0.08)',
+                                      border: '1.5px dashed rgba(99, 102, 241, 0.45)',
+                                      borderRadius: '4px',
+                                      margin: '0.2rem',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      gap: '0.35rem',
+                                      color: '#a5b4fc',
+                                      fontSize: '0.82rem',
+                                      fontWeight: 600,
+                                      transition: 'all 0.2s'
+                                    }}
+                                    onClick={() => setEditingShift({ dayIdx, shiftTime: 'morning', idx, oldPerson: s })}
+                                    title="משבצת פנויה - לחץ לשיבוץ תורן"
+                                  >
+                                    {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'morning' && editingShift?.idx === idx ? (
+                                      <select
+                                        autoFocus
+                                        onBlur={() => setEditingShift(null)}
+                                        onChange={(e) => {
+                                          if (e.target.value === '__REMOVE__') {
+                                            handleRemoveSoldierFromShift(dayIdx, 'morning', idx, s);
+                                          } else if (e.target.value) {
+                                            handleBaltamChange(dayIdx, 'morning', idx, s, e.target.value);
+                                          }
+                                        }}
+                                        style={{ width: '100%', padding: '0.25rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
+                                      >
+                                        <option value="">בחר חייל לשיבוץ...</option>
+                                        <option value="__REMOVE__" style={{ color: '#ef4444', fontWeight: 'bold' }}>❌ הסר משבצת זו לגמרי</option>
+                                        {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
+                                          <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
+                                            {soldier.name} ({d.departmentName})
+                                          </option>
+                                        )))}
+                                      </select>
+                                    ) : (
+                                      <>
+                                        <Plus size={13} color="var(--primary-color)" />
+                                        <span>משבצת פנויה #{idx + 1}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              }
+
                               const isSlotEdited = s.isEdited || s.isAdded || (s.originalName && (s.name !== s.originalName || s.department !== s.originalDepartment));
                               return (
                                 <div 
@@ -2253,7 +2452,7 @@ const ManagerScreen = () => {
                                     transition: 'all 0.2s' 
                                   }} 
                                   onClick={() => setEditingShift({ dayIdx, shiftTime: 'morning', idx, oldPerson: s })} 
-                                  title="לחץ להחלפה או להסרת התורן"
+                                  title="לחץ להחלפה, ריקון או להסרת התורן"
                                 >
                                    {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'morning' && editingShift?.idx === idx ? (
                                      <select 
@@ -2269,6 +2468,7 @@ const ManagerScreen = () => {
                                         style={{ width: '100%', padding: '0.25rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
                                      >
                                        <option value="">בחר מחליף...</option>
+                                       <option value="__CLEAR__" style={{ color: '#f59e0b', fontWeight: 'bold' }}>🧹 רוקן משבצת (החזר לפנויה)</option>
                                        <option value="__REMOVE__" style={{ color: '#ef4444', fontWeight: 'bold' }}>❌ הסר תורן ממשמרת זו</option>
                                        {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
                                          <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
@@ -2380,6 +2580,62 @@ const ManagerScreen = () => {
                             )}
 
                             {(day.evening || []).map((s, idx) => {
+                              const isEmpty = !s.name || s.isSlotEmpty;
+                              if (isEmpty) {
+                                return (
+                                  <div
+                                    key={idx}
+                                    style={{
+                                      padding: '0.45rem',
+                                      borderBottom: idx < day.evening.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+                                      cursor: 'pointer',
+                                      backgroundColor: 'rgba(99, 102, 241, 0.08)',
+                                      border: '1.5px dashed rgba(99, 102, 241, 0.45)',
+                                      borderRadius: '4px',
+                                      margin: '0.2rem',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      gap: '0.35rem',
+                                      color: '#a5b4fc',
+                                      fontSize: '0.82rem',
+                                      fontWeight: 600,
+                                      transition: 'all 0.2s'
+                                    }}
+                                    onClick={() => setEditingShift({ dayIdx, shiftTime: 'evening', idx, oldPerson: s })}
+                                    title="משבצת פנויה - לחץ לשיבוץ תורן"
+                                  >
+                                    {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'evening' && editingShift?.idx === idx ? (
+                                      <select
+                                        autoFocus
+                                        onBlur={() => setEditingShift(null)}
+                                        onChange={(e) => {
+                                          if (e.target.value === '__REMOVE__') {
+                                            handleRemoveSoldierFromShift(dayIdx, 'evening', idx, s);
+                                          } else if (e.target.value) {
+                                            handleBaltamChange(dayIdx, 'evening', idx, s, e.target.value);
+                                          }
+                                        }}
+                                        style={{ width: '100%', padding: '0.25rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
+                                      >
+                                        <option value="">בחר חייל לשיבוץ...</option>
+                                        <option value="__REMOVE__" style={{ color: '#ef4444', fontWeight: 'bold' }}>❌ הסר משבצת זו לגמרי</option>
+                                        {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
+                                          <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
+                                            {soldier.name} ({d.departmentName})
+                                          </option>
+                                        )))}
+                                      </select>
+                                    ) : (
+                                      <>
+                                        <Plus size={13} color="var(--primary-color)" />
+                                        <span>משבצת פנויה #{idx + 1}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              }
+
                               const isSlotEdited = s.isEdited || s.isAdded || (s.originalName && (s.name !== s.originalName || s.department !== s.originalDepartment));
                               return (
                                 <div 
@@ -2393,7 +2649,7 @@ const ManagerScreen = () => {
                                     transition: 'all 0.2s' 
                                   }} 
                                   onClick={() => setEditingShift({ dayIdx, shiftTime: 'evening', idx, oldPerson: s })} 
-                                  title="לחץ להחלפה או להסרת התורן"
+                                  title="לחץ להחלפה, ריקון או להסרת התורן"
                                 >
                                    {editingShift?.dayIdx === dayIdx && editingShift?.shiftTime === 'evening' && editingShift?.idx === idx ? (
                                      <select 
@@ -2409,6 +2665,7 @@ const ManagerScreen = () => {
                                         style={{ width: '100%', padding: '0.25rem', backgroundColor: '#333', color: 'white', border: '1px solid var(--primary-color)', borderRadius: '4px' }}
                                      >
                                        <option value="">בחר מחליף...</option>
+                                       <option value="__CLEAR__" style={{ color: '#f59e0b', fontWeight: 'bold' }}>🧹 רוקן משבצת (החזר לפנויה)</option>
                                        <option value="__REMOVE__" style={{ color: '#ef4444', fontWeight: 'bold' }}>❌ הסר תורן ממשמרת זו</option>
                                        {departmentsData.flatMap(d => (d.soldiers || []).map(soldier => (
                                          <option key={`${soldier.name}_${d.departmentName}`} value={`${soldier.name}_${d.departmentName}`}>
@@ -2636,9 +2893,19 @@ const ManagerScreen = () => {
 
             </div>
           ) : (
-            <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
-              טבלת השבצ״ק תהיה זמינה לאחר הפקת השיבוץ בשלב 4 והעברתו לכאן.
-            </p>
+            <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '1.25rem', fontSize: '1rem' }}>
+                לוח החיילים טרם הופעל. באפשרותך להפעיל כעת לוח משבצות ריקות לפי דרישות המטבח כדי שהחיילים יוכלו למלא את שמם, או להפיק שיבוץ אוטומטי בשלב 3 ולהעבירו לכאן.
+              </p>
+              <button
+                type="button"
+                onClick={handleResetSoldierTableToEmpty}
+                className="btn"
+                style={{ padding: '0.75rem 1.6rem', fontSize: '1rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+              >
+                <Plus size={18} /> 📋 הפעל לוח משבצות ריקות לחיילים (לפי דרישות טבחים)
+              </button>
+            </div>
           )}
         </div>
 
